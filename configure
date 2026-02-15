@@ -337,6 +337,7 @@ or1k*) ARCH=or1k ;;
 powerpc64*|ppc64*) ARCH=powerpc64 ;;
 powerpc*|ppc*) ARCH=powerpc ;;
 riscv64*) ARCH=riscv64 ;;
+linx64*) ARCH=linx64 ;;
 riscv32*) ARCH=riscv32 ;;
 sh[1-9bel-]*|sh|superh*) ARCH=sh ;;
 s390x*) ARCH=s390x ;;
