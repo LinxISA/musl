@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${MODE:-phase-a}"
+MODE="${MODE:-phase-b}"
 case "$MODE" in
   phase-a|phase-b) ;;
   *)
@@ -167,12 +167,6 @@ fi
 echo "m1=pass" >> "$SUMMARY"
 
 echo "[M2] build static libc + crt objects ($MODE)"
-BASE_EXCLUDES=(
-  "obj/src/locale/catopen.o"
-  "obj/src/locale/dcngettext.o"
-  "obj/src/misc/nftw.o"
-  "obj/src/misc/realpath.o"
-)
 PHASE_A_MAX_ROUNDS="${PHASE_A_MAX_ROUNDS:-16}"
 phase_a_exclude_report="$LOG_DIR/${MODE}-exclusions.md"
 extra_excludes=()
@@ -228,16 +222,6 @@ while true; do
     fi
 
     skip=0
-    for base in "${BASE_EXCLUDES[@]}"; do
-      if [[ "$obj" == "$base" ]]; then
-        skip=1
-        break
-      fi
-    done
-    if (( skip == 1 )); then
-      continue
-    fi
-
     if [[ ${#extra_excludes[@]} -gt 0 ]]; then
       for seen in "${extra_excludes[@]}"; do
         if [[ "$obj" == "$seen" ]]; then
@@ -383,9 +367,16 @@ else
   [[ -n "$crash_sig" ]] && echo "m3_crash_signature=$crash_sig" >> "$SUMMARY"
 fi
 
-ln -sf "$(basename "$CONFIG_LOG")" "$LOG_DIR/${MODE}-configure.latest.log"
-ln -sf "$(basename "$M2_LOG")" "$LOG_DIR/${MODE}-m2-libc-a.latest.log"
-ln -sf "$(basename "$M3_LOG")" "$LOG_DIR/${MODE}-m3-shared.latest.log"
-ln -sf "$(basename "$SUMMARY")" "$LOG_DIR/${MODE}-summary.latest.txt"
+update_latest_link() {
+  local src="$1"
+  local dst="$2"
+  rm -f "$dst"
+  ln -s "$src" "$dst"
+}
+
+update_latest_link "$(basename "$CONFIG_LOG")" "$LOG_DIR/${MODE}-configure.latest.log"
+update_latest_link "$(basename "$M2_LOG")" "$LOG_DIR/${MODE}-m2-libc-a.latest.log"
+update_latest_link "$(basename "$M3_LOG")" "$LOG_DIR/${MODE}-m3-shared.latest.log"
+update_latest_link "$(basename "$SUMMARY")" "$LOG_DIR/${MODE}-summary.latest.txt"
 
 echo "ok: $SUMMARY"
