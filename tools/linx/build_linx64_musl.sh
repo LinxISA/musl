@@ -1,0 +1,391 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="${MODE:-phase-a}"
+case "$MODE" in
+  phase-a|phase-b) ;;
+  *)
+    echo "error: MODE must be phase-a or phase-b (got '$MODE')" >&2
+    exit 2
+    ;;
+esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+MUSL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+
+LINX_ISA_ROOT="${LINX_ISA_ROOT:-/Users/zhoubot/linx-isa}"
+TARGET="${TARGET:-linx64-unknown-linux-musl}"
+MALLOC_IMPL="${MALLOC_IMPL:-oldmalloc}"
+
+LLVM_BIN="${LLVM_BIN:-/Users/zhoubot/llvm-project/build-linxisa-clang/bin}"
+CLANG="${CLANG:-$LLVM_BIN/clang}"
+AR="${AR:-$LLVM_BIN/llvm-ar}"
+RANLIB="${RANLIB:-$LLVM_BIN/llvm-ranlib}"
+NM="${NM:-$LLVM_BIN/llvm-nm}"
+STRIP="${STRIP:-$LLVM_BIN/llvm-strip}"
+READELF="${READELF:-$LLVM_BIN/llvm-readelf}"
+LLVM_PROJECT_ROOT="${LLVM_PROJECT_ROOT:-/Users/zhoubot/llvm-project}"
+COMPILER_RT_BUILTINS_DIR="${COMPILER_RT_BUILTINS_DIR:-$LLVM_PROJECT_ROOT/compiler-rt/lib/builtins}"
+
+JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+OUT_ROOT="${OUT_ROOT:-$LINX_ISA_ROOT/out/libc/musl}"
+BUILD_DIR="${BUILD_DIR:-$OUT_ROOT/build/$MODE}"
+INSTALL_DIR="${INSTALL_DIR:-$OUT_ROOT/install/$MODE}"
+LOG_DIR="${LOG_DIR:-$OUT_ROOT/logs}"
+RUNTIME_DIR="${RUNTIME_DIR:-$OUT_ROOT/runtime/$MODE}"
+RUNTIME_OBJ_DIR="$RUNTIME_DIR/obj"
+RUNTIME_LIB="$RUNTIME_DIR/liblinx_builtin_rt.a"
+
+mkdir -p "$LOG_DIR" "$OUT_ROOT/build" "$OUT_ROOT/install"
+
+CONFIG_LOG="$LOG_DIR/${MODE}-configure.log"
+M2_LOG="$LOG_DIR/${MODE}-m2-libc-a.log"
+M3_LOG="$LOG_DIR/${MODE}-m3-shared.log"
+M3_BLOCKER_REPORT="$LOG_DIR/${MODE}-m3-blockers.md"
+M3_NOTEXT_LOG="$LOG_DIR/${MODE}-m3-shared-notext-probe.log"
+SUMMARY="$LOG_DIR/${MODE}-summary.txt"
+RUNTIME_LOG="$LOG_DIR/${MODE}-runtime-builtins.log"
+
+for exe in "$CLANG" "$AR" "$RANLIB" "$NM" "$STRIP" "$READELF"; do
+  if [[ ! -x "$exe" ]]; then
+    echo "error: missing executable tool: $exe" >&2
+    exit 2
+  fi
+done
+
+CC_CMD="$CLANG --target=$TARGET -fuse-ld=lld"
+
+build_runtime_builtins() {
+  local -a srcs=(
+    "adddf3.c"
+    "subdf3.c"
+    "muldf3.c"
+    "divdf3.c"
+    "addsf3.c"
+    "subsf3.c"
+    "mulsf3.c"
+    "divsf3.c"
+    "muldc3.c"
+    "mulsc3.c"
+    "linx/fp_mode.c"
+  )
+
+  if [[ ! -d "$COMPILER_RT_BUILTINS_DIR" ]]; then
+    echo "error: missing compiler-rt builtins directory: $COMPILER_RT_BUILTINS_DIR" >&2
+    return 1
+  fi
+
+  rm -rf "$RUNTIME_DIR"
+  mkdir -p "$RUNTIME_OBJ_DIR"
+  : >"$RUNTIME_LOG"
+
+  local -a objs=()
+  local rel src obj
+  for rel in "${srcs[@]}"; do
+    src="$COMPILER_RT_BUILTINS_DIR/$rel"
+    if [[ ! -f "$src" ]]; then
+      echo "error: missing compiler-rt source: $src" >&2
+      return 1
+    fi
+
+    obj="$RUNTIME_OBJ_DIR/${rel//\//_}.o"
+    if ! "$CLANG" \
+      --target="$TARGET" \
+      -O2 \
+      -ffreestanding \
+      -fno-builtin \
+      -I"$COMPILER_RT_BUILTINS_DIR" \
+      -c "$src" \
+      -o "$obj" >>"$RUNTIME_LOG" 2>&1; then
+      echo "error: failed to compile compiler-rt source: $src (see $RUNTIME_LOG)" >&2
+      return 1
+    fi
+    objs+=("$obj")
+  done
+
+  if ! "$AR" rc "$RUNTIME_LIB" "${objs[@]}" >>"$RUNTIME_LOG" 2>&1; then
+    echo "error: failed to archive runtime builtins (see $RUNTIME_LOG)" >&2
+    return 1
+  fi
+  if ! "$RANLIB" "$RUNTIME_LIB" >>"$RUNTIME_LOG" 2>&1; then
+    echo "error: failed to ranlib runtime builtins (see $RUNTIME_LOG)" >&2
+    return 1
+  fi
+}
+
+rm -rf "$BUILD_DIR" "$INSTALL_DIR"
+mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
+
+{
+  echo "mode=$MODE"
+  echo "musl_root=$MUSL_ROOT"
+  echo "target=$TARGET"
+  echo "malloc_impl=$MALLOC_IMPL"
+  echo "llvm_bin=$LLVM_BIN"
+  echo "build_dir=$BUILD_DIR"
+  echo "install_dir=$INSTALL_DIR"
+  echo "runtime_builtins=$RUNTIME_LIB"
+  echo "runtime_builtins_log=$RUNTIME_LOG"
+  echo "jobs=$JOBS"
+} > "$SUMMARY"
+
+echo "[RT] build compiler-rt soft-float builtins"
+if ! build_runtime_builtins; then
+  {
+    echo "m1=not-run"
+    echo "m2=not-run"
+    echo "m3=not-run"
+  } >> "$SUMMARY"
+  exit 1
+fi
+
+echo "[M1] configure ($MODE)"
+if ! (
+  cd "$BUILD_DIR"
+  env \
+    CC="$CC_CMD" \
+    AR="$AR" \
+    RANLIB="$RANLIB" \
+    NM="$NM" \
+    STRIP="$STRIP" \
+    READELF="$READELF" \
+    LIBCC="$RUNTIME_LIB" \
+    "$MUSL_ROOT/configure" \
+      --target="$TARGET" \
+      --with-malloc="$MALLOC_IMPL" \
+      --prefix=/usr \
+      --syslibdir=/lib
+) >"$CONFIG_LOG" 2>&1; then
+  {
+    echo "m1=fail"
+    echo "m2=not-run"
+    echo "m3=not-run"
+  } >> "$SUMMARY"
+  echo "error: M1 configure failed; see $CONFIG_LOG" >&2
+  exit 1
+fi
+echo "m1=pass" >> "$SUMMARY"
+
+echo "[M2] build static libc + crt objects ($MODE)"
+BASE_EXCLUDES=(
+  "obj/src/locale/catopen.o"
+  "obj/src/locale/dcngettext.o"
+  "obj/src/misc/nftw.o"
+  "obj/src/misc/realpath.o"
+)
+PHASE_A_MAX_ROUNDS="${PHASE_A_MAX_ROUNDS:-16}"
+phase_a_exclude_report="$LOG_DIR/${MODE}-exclusions.md"
+extra_excludes=()
+m2_ok=0
+round=0
+: >"$M2_LOG"
+
+while true; do
+  round=$((round + 1))
+  {
+    echo "== m2 round=$round mode=$MODE =="
+    if [[ ${#extra_excludes[@]} -gt 0 ]]; then
+      echo "extra_excludes=${extra_excludes[*]}"
+    fi
+  } >>"$M2_LOG"
+
+  make_cmd=(make -j"$JOBS" LINX_MUSL_MODE="$MODE")
+  if [[ "$MODE" == "phase-a" && ${#extra_excludes[@]} -gt 0 ]]; then
+    make_cmd+=("LINX_MUSL_EXTRA_EXCLUDES=${extra_excludes[*]}")
+  fi
+  make_cmd+=(lib/libc.a lib/crt1.o lib/crti.o lib/crtn.o)
+
+  if (
+    cd "$BUILD_DIR"
+    "${make_cmd[@]}"
+  ) >>"$M2_LOG" 2>&1; then
+    m2_ok=1
+    break
+  fi
+
+  if [[ "$MODE" == "phase-b" ]]; then
+    break
+  fi
+  if (( round >= PHASE_A_MAX_ROUNDS )); then
+    break
+  fi
+
+  failed_objs=()
+  while IFS= read -r obj; do
+    [[ "$obj" == obj/* ]] || continue
+    failed_objs+=("$obj")
+  done < <(
+    rg "make: \\*\\*\\* \\[obj/[^]]+\\] Error" "$M2_LOG" \
+      | rg -o "obj/[^]]+" \
+      | sed 's/\.lo$/.o/' \
+      | sort -u
+  )
+
+  new_count=0
+  for obj in "${failed_objs[@]}"; do
+    if [[ -z "$obj" ]]; then
+      continue
+    fi
+
+    skip=0
+    for base in "${BASE_EXCLUDES[@]}"; do
+      if [[ "$obj" == "$base" ]]; then
+        skip=1
+        break
+      fi
+    done
+    if (( skip == 1 )); then
+      continue
+    fi
+
+    if [[ ${#extra_excludes[@]} -gt 0 ]]; then
+      for seen in "${extra_excludes[@]}"; do
+        if [[ "$obj" == "$seen" ]]; then
+          skip=1
+          break
+        fi
+      done
+    fi
+    if (( skip == 1 )); then
+      continue
+    fi
+
+    extra_excludes+=("$obj")
+    new_count=$((new_count + 1))
+  done
+
+  if (( new_count == 0 )); then
+    break
+  fi
+done
+
+if (( m2_ok == 0 )); then
+  {
+    echo "m2=fail"
+    echo "m3=not-run"
+  } >> "$SUMMARY"
+  echo "error: M2 static build failed; see $M2_LOG" >&2
+  exit 1
+fi
+
+if [[ "$MODE" == "phase-a" && ${#extra_excludes[@]} -gt 0 ]]; then
+  {
+    echo "# Phase-A temporary excludes"
+    echo
+    echo "mode=$MODE"
+    echo "issue_owner=llvm-backend"
+    echo
+    sig="$(rg -m1 'fatal error:|clang frontend command failed' "$M2_LOG" || true)"
+    [[ -n "$sig" ]] && echo "crash_signature=$sig"
+    echo
+    echo "extra_excludes:"
+    for obj in "${extra_excludes[@]}"; do
+      echo "- $obj"
+    done
+    echo
+    echo "repro_files:"
+    rg -o '/var/folders/[^ ]+\.(c|sh)' "$M2_LOG" | sort -u | sed 's/^/- /' || true
+  } >"$phase_a_exclude_report"
+
+  {
+    echo "phase_a_extra_excludes_count=${#extra_excludes[@]}"
+    echo "phase_a_extra_excludes=${extra_excludes[*]}"
+    echo "phase_a_exclusion_report=$phase_a_exclude_report"
+  } >>"$SUMMARY"
+fi
+
+(
+  cd "$BUILD_DIR"
+  make LINX_MUSL_MODE="$MODE" install-headers DESTDIR="$INSTALL_DIR"
+) >>"$M2_LOG" 2>&1
+
+mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/usr/lib"
+install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/lib/libc.a"
+install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/usr/lib/libc.a"
+install -m 644 "$BUILD_DIR/lib/crt1.o" "$INSTALL_DIR/lib/crt1.o"
+install -m 644 "$BUILD_DIR/lib/crti.o" "$INSTALL_DIR/lib/crti.o"
+install -m 644 "$BUILD_DIR/lib/crtn.o" "$INSTALL_DIR/lib/crtn.o"
+install -m 644 "$BUILD_DIR/lib/crt1.o" "$INSTALL_DIR/usr/lib/crt1.o"
+install -m 644 "$BUILD_DIR/lib/crti.o" "$INSTALL_DIR/usr/lib/crti.o"
+install -m 644 "$BUILD_DIR/lib/crtn.o" "$INSTALL_DIR/usr/lib/crtn.o"
+
+echo "m2=pass" >> "$SUMMARY"
+
+echo "[M3] attempt shared libc ($MODE)"
+if (
+  cd "$BUILD_DIR"
+  make -j"$JOBS" LINX_MUSL_MODE="$MODE" lib/libc.so
+) >"$M3_LOG" 2>&1; then
+  echo "m3=pass" >> "$SUMMARY"
+  rm -f "$M3_BLOCKER_REPORT"
+else
+  fail_obj="$(rg -m1 "make: \\*\\*\\* \\[obj/[^]]+\\] Error" "$M3_LOG" | rg -o "obj/[^]]+" || true)"
+  fail_src=""
+  if [[ -n "$fail_obj" ]]; then
+    fail_src="$(rg -m1 " -c -o ${fail_obj//\//\\/} " "$M3_LOG" | sed -E 's/^.* -c -o [^ ]+ //g' || true)"
+  fi
+  crash_sig="$(rg -m1 'fatal error:|clang frontend command failed|error in backend' "$M3_LOG" || true)"
+  if [[ -z "$crash_sig" ]]; then
+    crash_sig="$(rg -m1 'error:' "$M3_LOG" || true)"
+  fi
+  {
+    echo "# M3 blocker report"
+    echo
+    echo "mode=$MODE"
+    echo "target=$TARGET"
+    echo "malloc_impl=$MALLOC_IMPL"
+    echo "issue_owner=llvm-backend"
+    [[ -n "$fail_obj" ]] && echo "failing_object=$fail_obj"
+    [[ -n "$fail_src" ]] && echo "failing_source=$fail_src"
+    [[ -n "$crash_sig" ]] && echo "crash_signature=$crash_sig"
+    echo
+    echo "repro_files:"
+    rg -o '/var/folders/[^ ]+\.(c|sh)' "$M3_LOG" | sort -u | sed 's/^/- /' || true
+  } >"$M3_BLOCKER_REPORT"
+
+  # Phase-B diagnostic probe:
+  # Retry shared link with -z notext to surface the next blocker class once
+  # read-only relocation policy is relaxed (typically unresolved builtins/stubs).
+  if [[ "${M3_NOTEXT_PROBE:-1}" == "1" ]]; then
+    if (
+      cd "$BUILD_DIR"
+      make -j"$JOBS" LINX_MUSL_MODE="$MODE" LDFLAGS="-Wl,-z,notext" lib/libc.so
+    ) >"$M3_NOTEXT_LOG" 2>&1; then
+      {
+        echo
+        echo "secondary_probe=notext"
+        echo "secondary_status=pass"
+      } >>"$M3_BLOCKER_REPORT"
+      echo "m3_notext_probe=pass" >>"$SUMMARY"
+      echo "m3_notext_probe_log=$M3_NOTEXT_LOG" >>"$SUMMARY"
+    else
+      probe_sig="$(rg -m1 'undefined (hidden )?symbol:|error:' "$M3_NOTEXT_LOG" || true)"
+      {
+        echo
+        echo "secondary_probe=notext"
+        echo "secondary_status=fail"
+        [[ -n "$probe_sig" ]] && echo "secondary_signature=$probe_sig"
+        echo "secondary_undefined_symbols:"
+        rg -o 'undefined (hidden )?symbol: [^ ]+' "$M3_NOTEXT_LOG" \
+          | sort -u \
+          | sed 's/^/- /' \
+          || true
+      } >>"$M3_BLOCKER_REPORT"
+      echo "m3_notext_probe=fail" >>"$SUMMARY"
+      echo "m3_notext_probe_log=$M3_NOTEXT_LOG" >>"$SUMMARY"
+      [[ -n "$probe_sig" ]] && echo "m3_notext_probe_signature=$probe_sig" >>"$SUMMARY"
+    fi
+  fi
+
+  echo "m3=blocked" >> "$SUMMARY"
+  echo "m3_blocker_report=$M3_BLOCKER_REPORT" >> "$SUMMARY"
+  [[ -n "$fail_obj" ]] && echo "m3_failing_object=$fail_obj" >> "$SUMMARY"
+  [[ -n "$crash_sig" ]] && echo "m3_crash_signature=$crash_sig" >> "$SUMMARY"
+fi
+
+ln -sf "$(basename "$CONFIG_LOG")" "$LOG_DIR/${MODE}-configure.latest.log"
+ln -sf "$(basename "$M2_LOG")" "$LOG_DIR/${MODE}-m2-libc-a.latest.log"
+ln -sf "$(basename "$M3_LOG")" "$LOG_DIR/${MODE}-m3-shared.latest.log"
+ln -sf "$(basename "$SUMMARY")" "$LOG_DIR/${MODE}-summary.latest.txt"
+
+echo "ok: $SUMMARY"

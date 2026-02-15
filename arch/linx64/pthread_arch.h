@@ -1,7 +1,7 @@
 static inline uintptr_t __get_tp()
 {
-	/* Placeholder for bring-up until thread-pointer CSR read is exposed. */
-	return 0;
+	extern uintptr_t __linx_get_tp(void);
+	return __linx_get_tp();
 }
 
 #define TLS_ABOVE_TP
