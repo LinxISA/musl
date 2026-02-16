@@ -20,5 +20,15 @@ longjmp:
 	ldi	[a0, 64],	->s8
 	ldi	[a0, 72],	->sp
 	ldi	[a0, 80],	->ra
+	C.BSTART	COND, 1f
+	setc.eq	a1, zero
+	C.BSTOP
+	C.BSTART	DIRECT, 2f
+	C.BSTOP
+1:
+	addiw	zero, 1,	->a1
+2:
 	c.movr	a1,	->a0
-	C.BSTART.STD	RET
+	C.BSTART.STD	IND
+	setc.tgt	ra
+	C.BSTOP

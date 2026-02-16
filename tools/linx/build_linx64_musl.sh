@@ -300,6 +300,12 @@ if (
   cd "$BUILD_DIR"
   make -j"$JOBS" LINX_MUSL_MODE="$MODE" lib/libc.so
 ) >"$M3_LOG" 2>&1; then
+  install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/lib/libc.so"
+  install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/usr/lib/libc.so"
+  ln -sf libc.so "$INSTALL_DIR/lib/ld-musl-linx64.so.1"
+  echo "shared_install=pass" >>"$SUMMARY"
+  echo "shared_lib=$INSTALL_DIR/lib/libc.so" >>"$SUMMARY"
+  echo "shared_loader=$INSTALL_DIR/lib/ld-musl-linx64.so.1" >>"$SUMMARY"
   echo "m3=pass" >> "$SUMMARY"
   rm -f "$M3_BLOCKER_REPORT"
 else

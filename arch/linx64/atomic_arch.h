@@ -4,66 +4,86 @@ static inline void a_barrier()
 	__asm__ __volatile__("" ::: "memory");
 }
 
-extern volatile int __linx_atomic_lockword;
-
 /*
- * Raw SWAPW encoding for:
- *   swapw [a0], a1, ->a0
+ * Use lock-free LR/SC loops for CAS. The current QEMU/Linux bring-up stack
+ * implements LR/SC atomics in user mode, while HL.CAS* is not enabled yet.
+ * Emit raw instruction bytes because the asm parser cannot reliably parse
+ * the full Linx atomic field syntax in inline asm.
  *
- * Linx asm parser support for aq/rl/f atomic fields is still bring-up limited.
- * Emit the instruction word directly so we can rely on hardware atomic swap.
+ * Register bindings:
+ *   lr.*: a0 = address, result in a0
+ *   sc.*: a0 = address, a1 = value, result (0=success) in a0
  */
-#define LINX_SWAPW_A0_A1_TO_A0 0x2031610b
-#define LINX_STR1(x) #x
-#define LINX_STR(x) LINX_STR1(x)
+#define LINX_LR_W_A0_TO_A0  ".byte 0x0b,0x01,0x01,0x26"
+#define LINX_SC_W_A1_A0_TO_A0 ".byte 0x0b,0x91,0x21,0x26"
+#define LINX_LR_D_A0_TO_A0  ".byte 0x0b,0x01,0x01,0x36"
+#define LINX_SC_D_A1_A0_TO_A0 ".byte 0x0b,0x91,0x21,0x36"
 
-static inline int __linx_atomic_swapw(volatile int *p, int v)
+static inline int __linx_lr_w(volatile int *p)
+{
+	register long addr __asm__("a0") = (long)p;
+	__asm__ __volatile__(
+		LINX_LR_W_A0_TO_A0
+		: "+r"(addr)
+		:
+		: "memory");
+	return (int)addr;
+}
+
+static inline int __linx_sc_w(volatile int *p, int v)
 {
 	register long addr __asm__("a0") = (long)p;
 	register long val __asm__("a1") = (long)v;
 	__asm__ __volatile__(
-		".long " LINX_STR(LINX_SWAPW_A0_A1_TO_A0)
+		LINX_SC_W_A1_A0_TO_A0
 		: "+r"(addr)
 		: "r"(val)
 		: "memory");
 	return (int)addr;
 }
 
-static inline void __linx_atomic_lock(void)
+static inline unsigned long __linx_lr_d(volatile void *p)
 {
-	while (__linx_atomic_swapw(&__linx_atomic_lockword, 1) != 0)
-		__asm__ __volatile__("" ::: "memory");
-	a_barrier();
+	register long addr __asm__("a0") = (long)p;
+	__asm__ __volatile__(
+		LINX_LR_D_A0_TO_A0
+		: "+r"(addr)
+		:
+		: "memory");
+	return (unsigned long)addr;
 }
 
-static inline void __linx_atomic_unlock(void)
+static inline int __linx_sc_d(volatile void *p, unsigned long v)
 {
-	a_barrier();
-	__linx_atomic_lockword = 0;
-	a_barrier();
+	register long addr __asm__("a0") = (long)p;
+	register long val __asm__("a1") = (long)v;
+	__asm__ __volatile__(
+		LINX_SC_D_A1_A0_TO_A0
+		: "+r"(addr)
+		: "r"(val)
+		: "memory");
+	return (int)addr;
 }
 
 #define a_cas a_cas
 static inline int a_cas(volatile int *p, int t, int s)
 {
 	int old;
-	__linx_atomic_lock();
-	old = *p;
-	if (old == t)
-		*p = s;
-	__linx_atomic_unlock();
+	do {
+		old = __linx_lr_w(p);
+		if (old != t) break;
+	} while (__linx_sc_w(p, s) != 0);
 	return old;
 }
 
 #define a_cas_p a_cas_p
 static inline void *a_cas_p(volatile void *p, void *t, void *s)
 {
-	volatile void **pp = (volatile void **)p;
-	void *old;
-	__linx_atomic_lock();
-	old = *pp;
-	if (old == t)
-		*pp = s;
-	__linx_atomic_unlock();
-	return old;
+	unsigned long expect = (unsigned long)t;
+	unsigned long old;
+	do {
+		old = __linx_lr_d((volatile void *)p);
+		if (old != expect) break;
+	} while (__linx_sc_d((volatile void *)p, (unsigned long)s) != 0);
+	return (void *)old;
 }

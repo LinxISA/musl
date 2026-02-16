@@ -312,6 +312,7 @@ typedef struct {
 #define EM_FT32		222
 #define EM_MOXIE	223
 #define EM_AMDGPU	224
+#define EM_LINXISA	233
 #define EM_RISCV	243
 #define EM_BPF		247
 #define EM_CSKY		252
@@ -3251,6 +3252,35 @@ enum
 
 #define R_BPF_NONE		0
 #define R_BPF_MAP_FD		1
+
+#define R_LINX_NONE            0
+#define R_LINX_B12_PCREL       1
+#define R_LINX_J22_PCREL       2
+#define R_LINX_CBSTART12_PCREL 3
+#define R_LINX_B17_PCREL       4
+#define R_LINX_HL_BSTART30_PCREL 5
+#define R_LINX_CSETRET5_PCREL  6
+#define R_LINX_SETRET20_PCREL  7
+#define R_LINX_HL_SETRET32_PCREL 8
+#define R_LINX_RELATIVE        9
+#define R_LINX_64              10
+#define R_LINX_32              11
+#define R_LINX_JUMP_SLOT       12
+#define R_LINX_GLOB_DAT        13
+#define R_LINX_COPY            14
+#define R_LINX_PCREL_HI20      15
+#define R_LINX_B17_PLT         16
+#define R_LINX_LO12            17
+#define R_LINX_PCR17_LOAD      18
+#define R_LINX_PCR17_STORE     19
+#define R_LINX_HL_PCR29_LOAD   20
+#define R_LINX_HL_PCR29_STORE  21
+#define R_LINX_B25_PCREL       22
+#define R_LINX_TLS_DTPMOD64    23
+#define R_LINX_TLS_DTPREL64    24
+#define R_LINX_TLS_TPREL64     25
+#define R_LINX_TLSDESC         26
+#define R_LINX_IRELATIVE       27
 
 #define R_RISCV_NONE            0
 #define R_RISCV_32              1
