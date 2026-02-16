@@ -73,6 +73,10 @@ struct fdpic_dummy_loadmap {
 #define DL_NOMMU_SUPPORT 0
 #endif
 
+#ifndef DL_SKIP_VDSO
+#define DL_SKIP_VDSO 0
+#endif
+
 #ifndef TLSDESC_BACKWARDS
 #define TLSDESC_BACKWARDS 0
 #endif

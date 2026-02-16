@@ -21,4 +21,6 @@ setjmp:
 	sdi	sp, [a0, 72]
 	sdi	ra, [a0, 80]
 	c.movr	zero,	->a0
-	C.BSTART.STD	RET
+	C.BSTART.STD	IND
+	setc.tgt	ra
+	C.BSTOP

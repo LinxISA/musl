@@ -271,18 +271,31 @@ static Sym *sysv_lookup(const char *s, uint32_t h, struct dso *dso)
 static Sym *gnu_lookup(uint32_t h1, uint32_t *hashtab, struct dso *dso, const char *s)
 {
 	uint32_t nbuckets = hashtab[0];
-	uint32_t *buckets = hashtab + 4 + hashtab[2]*(sizeof(size_t)/4);
-	uint32_t i = buckets[h1 % nbuckets];
+	uint32_t symoffset = hashtab[1];
+	uintptr_t buckets_addr = (uintptr_t)(hashtab + 4)
+		+ (uintptr_t)hashtab[2] * sizeof(size_t);
+	uint32_t *buckets = (void *)buckets_addr;
+	uint32_t i;
+	uintptr_t hashval_addr;
 
+	if (!dso->syms || !dso->strings || !nbuckets) return 0;
+
+	i = buckets[h1 % nbuckets];
 	if (!i) return 0;
+	if (i < symoffset) return 0;
 
-	uint32_t *hashval = buckets + nbuckets + (i - hashtab[1]);
+	hashval_addr = (uintptr_t)(buckets + nbuckets)
+		+ (uintptr_t)(i - symoffset) * sizeof(uint32_t);
 
 	for (h1 |= 1; ; i++) {
-		uint32_t h2 = *hashval++;
-		if ((h1 == (h2|1)) && (!dso->versym || dso->versym[i] >= 0)
-		    && !strcmp(s, dso->strings + dso->syms[i].st_name))
-			return dso->syms+i;
+		uint32_t h2 = *(uint32_t *)hashval_addr;
+		hashval_addr += sizeof(uint32_t);
+		if ((h1 == (h2|1)) && (!dso->versym || dso->versym[i] >= 0)) {
+			Sym *sym = (void *)((uintptr_t)dso->syms
+				+ (uintptr_t)i * sizeof(Sym));
+			if (!strcmp(s, dso->strings + sym->st_name))
+				return sym;
+		}
 		if (h2 & 1) break;
 	}
 
@@ -461,12 +474,19 @@ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stri
 			longjmp(*rtld_fail, 1);
 		}
 
+		/*
+		 * Keep common absolute relocation classes on a straight-line path.
+		 * This avoids relying on large switch lowering for early ldso
+		 * self-relocation in bring-up toolchains.
+		 */
+		if (type==REL_SYMBOLIC || type==REL_GOT || type==REL_PLT) {
+			*reloc_addr = sym_val + addend;
+			continue;
+		}
+
 		switch(type) {
 		case REL_OFFSET:
 			addend -= (size_t)reloc_addr;
-		case REL_SYMBOLIC:
-		case REL_GOT:
-		case REL_PLT:
 			*reloc_addr = sym_val + addend;
 			break;
 		case REL_USYMBOLIC:
@@ -996,14 +1016,17 @@ static size_t count_syms(struct dso *p)
 	if (p->hashtab) return p->hashtab[1];
 
 	size_t nsym, i;
-	uint32_t *buckets = p->ghashtab + 4 + (p->ghashtab[2]*sizeof(size_t)/4);
+	uintptr_t buckets_addr = (uintptr_t)(p->ghashtab + 4)
+		+ (uintptr_t)p->ghashtab[2] * sizeof(size_t);
+	uint32_t *buckets = (void *)buckets_addr;
 	uint32_t *hashval;
 	for (i = nsym = 0; i < p->ghashtab[0]; i++) {
 		if (buckets[i] > nsym)
 			nsym = buckets[i];
 	}
 	if (nsym) {
-		hashval = buckets + p->ghashtab[0] + (nsym - p->ghashtab[1]);
+		hashval = (void *)((uintptr_t)(buckets + p->ghashtab[0])
+			+ (uintptr_t)(nsym - p->ghashtab[1]) * sizeof(uint32_t));
 		do nsym++;
 		while (!(*hashval++ & 1));
 	}
@@ -1420,7 +1443,7 @@ static void reloc_all(struct dso *p)
 		if (!DL_FDPIC)
 			do_relr_relocs(p, laddr(p, dyn[DT_RELR]), dyn[DT_RELRSZ]);
 
-		if (head != &ldso && p->relro_start != p->relro_end) {
+		if (head != &ldso && p != &ldso && p->relro_start != p->relro_end) {
 			long ret = __syscall(SYS_mprotect, laddr(p, p->relro_start),
 				p->relro_end-p->relro_start, PROT_READ);
 			if (ret != 0 && ret != -ENOSYS) {
@@ -1965,7 +1988,8 @@ void __dls3(size_t *sp, size_t *auxv)
 
 	/* Attach to vdso, if provided by the kernel, last so that it does
 	 * not become part of the global namespace.  */
-	if (search_vec(auxv, &vdso_base, AT_SYSINFO_EHDR) && vdso_base) {
+	if (!DL_SKIP_VDSO
+	    && search_vec(auxv, &vdso_base, AT_SYSINFO_EHDR) && vdso_base) {
 		Ehdr *ehdr = (void *)vdso_base;
 		Phdr *phdr = vdso.phdr = (void *)(vdso_base + ehdr->e_phoff);
 		vdso.phnum = ehdr->e_phnum;
@@ -2025,6 +2049,15 @@ void __dls3(size_t *sp, size_t *auxv)
 	 * copy relocations which depend on libraries' relocations. */
 	reloc_all(app.next);
 	reloc_all(&app);
+	if (ldso.relro_start != ldso.relro_end) {
+		long ret = __syscall(SYS_mprotect, laddr(&ldso, ldso.relro_start),
+			ldso.relro_end-ldso.relro_start, PROT_READ);
+		if (ret != 0 && ret != -ENOSYS) {
+			error("Error relocating %s: RELRO protection failed: %m",
+				ldso.name);
+			if (runtime) longjmp(*rtld_fail, 1);
+		}
+	}
 
 	/* Actual copying to new TLS needs to happen after relocations,
 	 * since the TLS images might have contained relocated addresses. */

@@ -9,4 +9,4 @@ static inline uintptr_t __get_tp()
 
 #define DTP_OFFSET 0x800
 
-#define MC_PC __gregs[0]
+#define MC_PC sc_regs.regs[24]

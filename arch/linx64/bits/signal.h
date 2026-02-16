@@ -6,53 +6,38 @@
 # define SIGSTKSZ 8192
 #endif
 
-typedef unsigned long __riscv_mc_gp_state[32];
+#define LINX_NGREG 25
 
-struct __riscv_mc_f_ext_state {
-	unsigned int __f[32];
-	unsigned int __fcsr;
-};
+typedef struct {
+	unsigned long regs[LINX_NGREG];
+} __linx_user_pt_regs;
 
-struct __riscv_mc_d_ext_state {
-	unsigned long long __f[32];
-	unsigned int __fcsr;
-};
-
-struct __riscv_mc_q_ext_state {
-	unsigned long long __f[64] __attribute__((__aligned__(16)));
-	unsigned int __fcsr;
-	unsigned int __reserved[3];
-};
-
-union __riscv_mc_fp_state {
-	struct __riscv_mc_f_ext_state __f;
-	struct __riscv_mc_d_ext_state __d;
-	struct __riscv_mc_q_ext_state __q;
-};
+typedef struct {
+	unsigned long long f[32];
+	unsigned int fcsr;
+	unsigned int __reserved;
+} __linx_mc_fp_state;
 
 typedef struct mcontext_t {
-	__riscv_mc_gp_state __gregs;
-	union __riscv_mc_fp_state __fpregs;
+	__linx_user_pt_regs sc_regs;
 } mcontext_t;
 
 #if defined(_GNU_SOURCE)
-#define REG_PC 0
-#define REG_RA 1
-#define REG_SP 2
-#define REG_TP 4
-#define REG_S0 8
-#define REG_S1 9
-#define REG_A0 10
-#define REG_S2 18
+#define REG_SP 1
+#define REG_A0 2
+#define REG_RA 10
+#define REG_S0 11
+#define REG_S1 12
+#define REG_S2 13
+#define REG_PC 24
 #endif
 
 #if defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 typedef unsigned long greg_t;
-typedef unsigned long gregset_t[32];
-typedef union __riscv_mc_fp_state fpregset_t;
+typedef unsigned long gregset_t[LINX_NGREG];
+typedef __linx_mc_fp_state fpregset_t;
 struct sigcontext {
-	gregset_t gregs;
-	fpregset_t fpregs;
+	__linx_user_pt_regs sc_regs;
 };
 #endif
 
@@ -68,12 +53,14 @@ typedef struct __ucontext
 	struct __ucontext *uc_link;
 	stack_t uc_stack;
 	sigset_t uc_sigmask;
+	unsigned char __unused[1024/8 - sizeof(sigset_t)];
 	mcontext_t uc_mcontext;
 } ucontext_t;
 
 #define SA_NOCLDSTOP 1
 #define SA_NOCLDWAIT 2
 #define SA_SIGINFO   4
+#define SA_RESTORER  0x04000000
 #define SA_ONSTACK   0x08000000
 #define SA_RESTART   0x10000000
 #define SA_NODEFER   0x40000000

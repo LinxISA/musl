@@ -26,7 +26,8 @@ static inline long __linx_syscall(long n, long a0, long a1, long a2, long a3, lo
 		"c.movr a0, ->%0\n"
 		: "=r"(ret)
 		: "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(n)
-		: "a0", "a1", "a2", "a3", "a4", "a5", "a7", "memory");
+		: "a0", "a1", "a2", "a3", "a4", "a5", "a7",
+		  "x0", "x1", "x2", "x3", "memory");
 
 	return ret;
 }
