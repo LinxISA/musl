@@ -164,7 +164,18 @@ lib/libc.so: $(LOBJS) $(LDSO_OBJS)
 
 lib/libc.a: $(AOBJS)
 	rm -f $@
+# Some environments (notably Windows) can exceed process argument limits when
+# archiving many objects. Use a response file only when using llvm-ar or on
+# Windows; keep the default behavior for GNU ar on Linux/macOS.
+ifneq (,$(findstring llvm-ar,$(notdir $(AR))))
+	$(file >obj/libc.a.rsp,$(AOBJS))
+	$(AR) rc $@ @obj/libc.a.rsp
+else ifeq ($(OS),Windows_NT)
+	$(file >obj/libc.a.rsp,$(AOBJS))
+	$(AR) rc $@ @obj/libc.a.rsp
+else
 	$(AR) rc $@ $(AOBJS)
+endif
 	$(RANLIB) $@
 
 $(EMPTY_LIBS):
