@@ -410,7 +410,10 @@ while true; do
   if [[ "$MODE" == "phase-a" && ${#extra_excludes[@]} -gt 0 ]]; then
     make_cmd+=("LINX_MUSL_EXTRA_EXCLUDES=${extra_excludes[*]}")
   fi
-  make_cmd+=(lib/libc.a lib/crt1.o lib/crti.o lib/crtn.o)
+  # Build startup CRT objects used by the AVS Linux harness.
+  # - rcrt1.o is required for static PIE (self-relocating crt1).
+  # - Scrt1.o is the dynamic/PIE startup object.
+  make_cmd+=(lib/libc.a lib/crt1.o lib/rcrt1.o lib/Scrt1.o lib/crti.o lib/crtn.o)
 
   if (
     cd "$BUILD_DIR"
@@ -519,9 +522,13 @@ mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/usr/lib"
 install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/lib/libc.a"
 install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/usr/lib/libc.a"
 install -m 644 "$BUILD_DIR/lib/crt1.o" "$INSTALL_DIR/lib/crt1.o"
+install -m 644 "$BUILD_DIR/lib/rcrt1.o" "$INSTALL_DIR/lib/rcrt1.o"
+install -m 644 "$BUILD_DIR/lib/Scrt1.o" "$INSTALL_DIR/lib/Scrt1.o"
 install -m 644 "$BUILD_DIR/lib/crti.o" "$INSTALL_DIR/lib/crti.o"
 install -m 644 "$BUILD_DIR/lib/crtn.o" "$INSTALL_DIR/lib/crtn.o"
 install -m 644 "$BUILD_DIR/lib/crt1.o" "$INSTALL_DIR/usr/lib/crt1.o"
+install -m 644 "$BUILD_DIR/lib/rcrt1.o" "$INSTALL_DIR/usr/lib/rcrt1.o"
+install -m 644 "$BUILD_DIR/lib/Scrt1.o" "$INSTALL_DIR/usr/lib/Scrt1.o"
 install -m 644 "$BUILD_DIR/lib/crti.o" "$INSTALL_DIR/usr/lib/crti.o"
 install -m 644 "$BUILD_DIR/lib/crtn.o" "$INSTALL_DIR/usr/lib/crtn.o"
 install_runtime_builtins_to_sysroot
