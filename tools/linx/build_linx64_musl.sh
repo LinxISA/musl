@@ -17,7 +17,7 @@ LINX_ISA_ROOT="${LINX_ISA_ROOT:-/Users/zhoubot/linx-isa}"
 TARGET="${TARGET:-linx64-unknown-linux-musl}"
 MALLOC_IMPL="${MALLOC_IMPL:-oldmalloc}"
 
-LLVM_BIN="${LLVM_BIN:-/Users/zhoubot/llvm-project/build-linxisa-clang/bin}"
+LLVM_BIN="${LLVM_BIN:-$LINX_ISA_ROOT/compiler/llvm/build-linxisa-clang/bin}"
 CLANG="${CLANG:-$LLVM_BIN/clang}"
 AR="${AR:-$LLVM_BIN/llvm-ar}"
 RANLIB="${RANLIB:-$LLVM_BIN/llvm-ranlib}"
@@ -26,6 +26,13 @@ STRIP="${STRIP:-$LLVM_BIN/llvm-strip}"
 READELF="${READELF:-$LLVM_BIN/llvm-readelf}"
 LLVM_PROJECT_ROOT="${LLVM_PROJECT_ROOT:-$LINX_ISA_ROOT/compiler/llvm}"
 COMPILER_RT_BUILTINS_DIR="${COMPILER_RT_BUILTINS_DIR:-$LLVM_PROJECT_ROOT/compiler-rt/lib/builtins}"
+CLANG_HEADERS_DIR="${CLANG_HEADERS_DIR:-$LLVM_PROJECT_ROOT/clang/lib/Headers}"
+
+[[ -x "$AR" ]] || AR="$(command -v llvm-ar || command -v ar || true)"
+[[ -x "$RANLIB" ]] || RANLIB="$(command -v llvm-ranlib || command -v ranlib || true)"
+[[ -x "$NM" ]] || NM="$(command -v llvm-nm || command -v nm || true)"
+[[ -x "$STRIP" ]] || STRIP="$(command -v llvm-strip || command -v strip || true)"
+[[ -x "$READELF" ]] || READELF="$(command -v llvm-readelf || command -v readelf || echo /opt/homebrew/opt/binutils/bin/readelf)"
 
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 OUT_ROOT="${OUT_ROOT:-$LINX_ISA_ROOT/out/libc/musl}"
@@ -124,6 +131,7 @@ build_runtime_builtins() {
       -O2 \
       -ffreestanding \
       -fno-builtin \
+      -I"$CLANG_HEADERS_DIR" \
       -I"$COMPILER_RT_BUILTINS_DIR" \
       ${extra_flag:+$extra_flag} \
       -c "$src" \
