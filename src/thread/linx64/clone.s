@@ -23,8 +23,7 @@ __clone:
 1:
 	ldi	[sp, 0],	->a1
 	ldi	[sp, 8],	->a0
-	addtpc	2f,	->ra
-	addi	ra, 2f,	->ra
+	setret	2f
 	C.BSTART	IND
 	setc.tgt	a1
 	C.BSTOP

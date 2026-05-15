@@ -15,7 +15,8 @@ __sigsetjmp:
 	sdi	ra, [a0, 88]
 	sdi	s0, [a0, 96]
 	c.movr	a0,	->s0
-	BSTART	CALL, setjmp, ra=2f
+	BSTART	CALL, setjmp
+	setret	2f
 	C.BSTOP
 2:
 	c.movr	a0,	->a1

@@ -4,11 +4,13 @@
 vfork:
 	C.BSTART.STD
 	addiw	zero, 220,	->a7
-	addiw	zero, 0x4111,	->a0
+	lui	4,	->a0
+	addi	a0, 273,	->a0
 	c.movr	sp,	->a1
 	acrc 1
 	.hidden __syscall_ret
-	BSTART	CALL, __syscall_ret, ra=1f
+	BSTART	CALL, __syscall_ret
+	setret	1f
 	C.BSTOP
 1:
 	C.BSTART.STD	IND
