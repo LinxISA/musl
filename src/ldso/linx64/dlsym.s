@@ -5,7 +5,8 @@
 dlsym:
 	C.BSTART.STD
 	c.movr	ra,	->a2
-	BSTART	CALL, __dlsym, ra=1f
+	BSTART	CALL, __dlsym
+	setret	1f
 	C.BSTOP
 1:
 	C.BSTART.STD	IND

@@ -86,6 +86,23 @@ build_runtime_builtins() {
     "subsf3.c"
     "mulsf3.c"
     "divsf3.c"
+    "addtf3.c"
+    "comparetf2.c"
+    "divtf3.c"
+    "extenddftf2.c"
+    "extendsftf2.c"
+    "fixtfdi.c"
+    "fixtfsi.c"
+    "fixunstfdi.c"
+    "fixunstfsi.c"
+    "floatditf.c"
+    "floatsitf.c"
+    "floatunditf.c"
+    "floatunsitf.c"
+    "multf3.c"
+    "subtf3.c"
+    "trunctfdf2.c"
+    "trunctfsf2.c"
     "muldc3.c"
     "mulsc3.c"
     "atomic.c"
@@ -111,6 +128,11 @@ build_runtime_builtins() {
   local rel src obj
   for rel in "${srcs[@]}"; do
     src="$COMPILER_RT_BUILTINS_DIR/$rel"
+    if [[ "$rel" == "linx/fp_mode.c" && ! -f "$src" && -f "$COMPILER_RT_BUILTINS_DIR/fp_mode.c" ]]; then
+      # Older and currently pinned compiler-rt layouts keep fp_mode.c at the
+      # builtins root rather than under a linx/ subdirectory.
+      src="$COMPILER_RT_BUILTINS_DIR/fp_mode.c"
+    fi
     if [[ ! -f "$src" ]]; then
       echo "error: missing compiler-rt source: $src" >&2
       return 1
