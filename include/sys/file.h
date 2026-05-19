@@ -4,6 +4,10 @@
 extern "C" {
 #endif
 
+#ifndef	_FCNTL_H
+# include <fcntl.h>
+#endif
+
 #define LOCK_SH	1
 #define LOCK_EX	2
 #define LOCK_NB	4
