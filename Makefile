@@ -18,7 +18,7 @@ libdir = $(prefix)/lib
 syslibdir = /lib
 
 MALLOC_DIR = mallocng
-SRC_DIRS = $(addprefix $(srcdir)/,src/* src/malloc/$(MALLOC_DIR) crt ldso $(COMPAT_SRC_DIRS))
+SRC_DIRS = $(addprefix $(srcdir)/,src/* src/malloc/$(MALLOC_DIR) crt ldso debug $(COMPAT_SRC_DIRS))
 BASE_GLOBS = $(addsuffix /*.c,$(SRC_DIRS))
 ARCH_GLOBS = $(addsuffix /$(ARCH)/*.[csS],$(SRC_DIRS))
 BASE_SRCS = $(sort $(wildcard $(BASE_GLOBS)))
@@ -40,14 +40,21 @@ IMPH = $(addprefix $(srcdir)/, src/internal/stdio_impl.h src/internal/pthread_im
 
 LDFLAGS =
 LDFLAGS_AUTO =
+
+ifeq ($(RTOS_NOGPLV3_TAG),-nogplv3)
+LIBCC = -lclang_rt.builtins
+else
 LIBCC = -lgcc
+endif
+
 CPPFLAGS =
 CFLAGS =
 CFLAGS_AUTO = -Os -pipe
 CFLAGS_C99FSE = -std=c99 -ffreestanding -nostdinc 
 
 CFLAGS_ALL = $(CFLAGS_C99FSE)
-CFLAGS_ALL += -D_XOPEN_SOURCE=700 -I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic -Iobj/src/internal -I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include
+CFLAGS_ALL += -D_XOPEN_SOURCE=700 -DSYSLIBDIR='"$(syslibdir)"' -DLIBDIR='"$(libdir)"'
+CFLAGS_ALL += -I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic -Iobj/src/internal -I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include
 CFLAGS_ALL += $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS)
 
 LDFLAGS_ALL = $(LDFLAGS_AUTO) $(LDFLAGS)
@@ -77,6 +84,14 @@ LDSO_PATHNAME = $(syslibdir)/ld-musl-$(ARCH)$(SUBARCH).so.1
 
 -include config.mak
 -include $(srcdir)/arch/$(ARCH)/arch.mak
+
+ifeq ($(ENABLE_BACKTRACE),yes)
+DEBUG_OBJS = $(filter obj/debug/%,$(ALL_OBJS))
+DEBUG_AOBJS = $(DEBUG_OBJS)
+DEBUG_LOBJS = $(DEBUG_OBJS:.o=.lo)
+else
+INCLUDES = $(filter-out $(srcdir)/include/execinfo.h, $(wildcard $(srcdir)/include/*.h $(srcdir)/include/*/*.h))
+endif
 
 ifeq ($(ARCH),)
 
@@ -109,11 +124,13 @@ obj/src/internal/version.o obj/src/internal/version.lo: obj/src/internal/version
 
 obj/crt/rcrt1.o obj/ldso/dlstart.lo obj/ldso/dynlink.lo: $(srcdir)/src/internal/dynlink.h $(srcdir)/arch/$(ARCH)/reloc.h
 
-obj/crt/crt1.o obj/crt/Scrt1.o obj/crt/rcrt1.o obj/ldso/dlstart.lo: $(srcdir)/arch/$(ARCH)/crt_arch.h
+obj/crt/crt1.o obj/crt/scrt1.o obj/crt/rcrt1.o obj/ldso/dlstart.lo: $(srcdir)/arch/$(ARCH)/crt_arch.h
 
 obj/crt/rcrt1.o: $(srcdir)/ldso/dlstart.c
 
+ifeq (,$(filter $(ARCH), linx64 linx64v4 linx64v5))
 obj/crt/Scrt1.o obj/crt/rcrt1.o: CFLAGS_ALL += -fPIC
+endif
 
 OPTIMIZE_SRCS = $(wildcard $(OPTIMIZE_GLOBS:%=$(srcdir)/src/%))
 $(OPTIMIZE_SRCS:$(srcdir)/%.c=obj/%.o) $(OPTIMIZE_SRCS:$(srcdir)/%.c=obj/%.lo): CFLAGS += -O3
@@ -129,7 +146,12 @@ $(NOSSP_OBJS) $(NOSSP_OBJS:%.o=%.lo): CFLAGS_ALL += $(CFLAGS_NOSSP)
 
 $(CRT_OBJS): CFLAGS_ALL += -DCRT
 
+ifeq (,$(filter $(ARCH), linx64 linx64v4 linx64v5))
 $(LOBJS) $(LDSO_OBJS): CFLAGS_ALL += -fPIC
+endif
+
+$(DEBUG_AOBJS): CFLAGS_ALL+= -fno-omit-frame-pointer -funwind-tables
+$(DEBUG_LOBJS): CFLAGS_ALL+= -fno-omit-frame-pointer -funwind-tables -fPIC
 
 CC_CMD = $(CC) $(CFLAGS_ALL) -c -o $@ $<
 
@@ -158,24 +180,19 @@ obj/%.lo: $(srcdir)/%.S
 obj/%.lo: $(srcdir)/%.c $(GENH) $(IMPH)
 	$(CC_CMD)
 
-lib/libc.so: $(LOBJS) $(LDSO_OBJS)
+ifeq ($(RTOS_NOGPLV3_TAG),-nogplv3)
+lib/libc.so: $(LOBJS) $(LDSO_OBJS) $(DEBUG_LOBJS)
 	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
-	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
-
-lib/libc.a: $(AOBJS)
-	rm -f $@
-# Some environments (notably Windows) can exceed process argument limits when
-# archiving many objects. Use a response file only when using llvm-ar or on
-# Windows; keep the default behavior for GNU ar on Linux/macOS.
-ifneq (,$(findstring llvm-ar,$(notdir $(AR))))
-	$(file >obj/libc.a.rsp,$(AOBJS))
-	$(AR) rc $@ @obj/libc.a.rsp
-else ifeq ($(OS),Windows_NT)
-	$(file >obj/libc.a.rsp,$(AOBJS))
-	$(AR) rc $@ @obj/libc.a.rsp
+	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(DEBUG_LOBJS) -lclang_rt.builtins
 else
-	$(AR) rc $@ $(AOBJS)
+lib/libc.so: $(LOBJS) $(LDSO_OBJS) $(DEBUG_LOBJS)
+	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
+	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(DEBUG_LOBJS) $(LIBCC)
 endif
+
+lib/libc.a: $(AOBJS) $(DEBUG_AOBJS)
+	rm -f $@
+	$(AR) rc $@ $(AOBJS) $(DEBUG_AOBJS)
 	$(RANLIB) $@
 
 $(EMPTY_LIBS):
@@ -221,7 +238,7 @@ $(DESTDIR)$(includedir)/%: $(srcdir)/include/%
 	$(INSTALL) -D -m 644 $< $@
 
 $(DESTDIR)$(LDSO_PATHNAME): $(DESTDIR)$(libdir)/libc.so
-	$(INSTALL) -D -l $(libdir)/libc.so $@ || true
+	$(INSTALL) -D -r $(DESTDIR)$(libdir)/libc.so $@ || true
 
 install-libs: $(ALL_LIBS:lib/%=$(DESTDIR)$(libdir)/%) $(if $(SHARED_LIBS),$(DESTDIR)$(LDSO_PATHNAME),)
 

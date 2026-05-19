@@ -1,0 +1,1 @@
+//needed by 'obj/crt/rcrt1.o'

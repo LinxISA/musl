@@ -34,6 +34,7 @@ Optional features:
   --enable-wrapper=...    build given musl toolchain wrapper [auto]
   --disable-shared        inhibit building shared library [enabled]
   --disable-static        inhibit building static library [enabled]
+  --enable-backtrace      enable backtrace feature [no]
 
 Optional packages:
   --with-malloc=...       choose malloc implementation [mallocng]
@@ -123,6 +124,7 @@ CFLAGS_TRY=
 LDFLAGS_AUTO=
 LDFLAGS_TRY=
 OPTIMIZE_GLOBS=
+ENABLE_BACKTRACE=
 srcdir=
 prefix=/usr/local/musl
 exec_prefix='$(prefix)'
@@ -163,6 +165,7 @@ case "$arg" in
 --disable-optimize) optimize=no ;;
 --enable-debug|--enable-debug=yes) debug=yes ;;
 --disable-debug|--enable-debug=no) debug=no ;;
+--enable-backtrace|--enable-backtrace=yes) backtrace=yes ;;
 --enable-warnings|--enable-warnings=yes) warnings=yes ;;
 --disable-warnings|--enable-warnings=no) warnings=no ;;
 --enable-wrapper|--enable-wrapper=yes) wrapper=detect ;;
@@ -328,7 +331,6 @@ i?86*) ARCH=i386 ;;
 x86_64-x32*|x32*|x86_64*x32) ARCH=x32 ;;
 x86_64-nt64*) ARCH=nt64 ;;
 x86_64*) ARCH=x86_64 ;;
-loongarch64*) ARCH=loongarch64 ;;
 m68k*) ARCH=m68k ;;
 mips64*|mipsisa64*) ARCH=mips64 ;;
 mips*) ARCH=mips ;;
@@ -337,14 +339,19 @@ or1k*) ARCH=or1k ;;
 powerpc64*|ppc64*) ARCH=powerpc64 ;;
 powerpc*|ppc*) ARCH=powerpc ;;
 riscv64*) ARCH=riscv64 ;;
+riscv*) ARCH=riscv32 ;;
+linx64v5*) ARCH=linx64v5 ;;
+linx64v4*) ARCH=linx64v4 ;;
 linx64*) ARCH=linx64 ;;
-riscv32*) ARCH=riscv32 ;;
 sh[1-9bel-]*|sh|superh*) ARCH=sh ;;
 s390x*) ARCH=s390x ;;
 unknown) fail "$0: unable to detect target arch; try $0 --target=..." ;;
 *) fail "$0: unknown or unsupported target \"$target\"" ;;
 esac
 
+echo "-------"
+echo "ARCH: $ARCH"
+echo "-------"
 #
 # Try to get a conforming C99 freestanding environment
 #
@@ -355,14 +362,6 @@ tryflag CFLAGS_C99FSE -ffreestanding \
 tryflag CFLAGS_C99FSE -fexcess-precision=standard \
 || { test "$ARCH" = i386 && tryflag CFLAGS_C99FSE -ffloat-store ; }
 tryflag CFLAGS_C99FSE -frounding-math
-
-#
-# Semantically we want to insist that our sources follow the
-# C rules for type-based aliasing, but most if not all real-world
-# compilers are known or suspected to have critical bugs in their
-# type-based aliasing analysis. See for example GCC bug 107107.
-#
-tryflag CFLAGS_C99FSE -fno-strict-aliasing
 
 #
 # We may use the may_alias attribute if __GNUC__ is defined, so
@@ -414,6 +413,11 @@ tryflag CFLAGS_MEMOPS -fno-tree-loop-distribute-patterns
 test "$debug" = yes && CFLAGS_AUTO=-g
 
 #
+# Enable backtrace feature if requessted.
+#
+test "$backtrace" = yes && ENABLE_BACKTRACE=yes
+
+#
 # Preprocess asm files to add extra debugging information if debug is
 # enabled, our assembler supports the needed directives, and the
 # preprocessing script has been written for our architecture.
@@ -447,20 +451,7 @@ xno|x) printf "disabled\n" ; optimize=no ;;
 *) printf "custom\n" ;;
 esac
 
-if test "$optimize" = no ; then :
-else
-tryflag CFLAGS_AUTO -O2
-tryflag CFLAGS_AUTO -fno-align-jumps
-tryflag CFLAGS_AUTO -fno-align-functions
-tryflag CFLAGS_AUTO -fno-align-loops
-tryflag CFLAGS_AUTO -fno-align-labels
-tryflag CFLAGS_AUTO -fira-region=one
-tryflag CFLAGS_AUTO -fira-hoist-pressure
-tryflag CFLAGS_AUTO -freorder-blocks-algorithm=simple \
-|| tryflag CFLAGS_AUTO -fno-reorder-blocks
-tryflag CFLAGS_AUTO -fno-prefetch-loop-arrays
-tryflag CFLAGS_AUTO -fno-tree-ch
-fi
+test "$optimize" = no || tryflag CFLAGS_AUTO -Os || tryflag CFLAGS_AUTO -O2
 test "$optimize" = yes && optimize="internal,malloc,string"
 
 if fnmatch 'no|size' "$optimize" ; then :
@@ -504,7 +495,6 @@ fi
 #
 tryflag CFLAGS_AUTO -fno-unwind-tables
 tryflag CFLAGS_AUTO -fno-asynchronous-unwind-tables
-
 #
 # Attempt to put each function and each data object in its own
 # section. This both allows additional size optimizations at link
@@ -674,19 +664,6 @@ if test "$ARCH" = "aarch64" ; then
 trycppif __AARCH64EB__ "$t" && SUBARCH=${SUBARCH}_be
 fi
 
-if test "$ARCH" = "loongarch64" ; then
-trycppif __loongarch_soft_float "$t" && SUBARCH=${SUBARCH}-sf
-trycppif __loongarch_single_float "$t" && SUBARCH=${SUBARCH}-sp
-printf "checking whether assembler support FCSRs... "
-echo "__asm__(\"movfcsr2gr \$t0,\$fcsr0\");" > "$tmpc"
-if $CC -c -o /dev/null "$tmpc" >/dev/null 2>&1 ; then
-printf "yes\n"
-else
-printf "no\n"
-CFLAGS_AUTO="$CFLAGS_AUTO -DBROKEN_LOONGARCH_FCSR_ASM"
-fi
-fi
-
 if test "$ARCH" = "m68k" ; then
 if trycppif "__HAVE_68881__" ; then : ;
 elif trycppif "__mcffpu__" ; then SUBARCH="-fp64"
@@ -729,7 +706,12 @@ trycppif __LITTLE_ENDIAN__ "$t" && SUBARCH=${SUBARCH}le
 trycppif _SOFT_FLOAT "$t" && fail "$0: error: soft-float not supported on powerpc64"
 fi
 
-if test "$ARCH" = "riscv64" -o "$ARCH" = "riscv32" ; then
+if test "$ARCH" = "riscv64" ; then
+trycppif __riscv_float_abi_soft "$t" && SUBARCH=${SUBARCH}-sf
+trycppif __riscv_float_abi_single "$t" && SUBARCH=${SUBARCH}-sp
+fi
+
+if test "$ARCH" = "riscv32" ; then
 trycppif __riscv_float_abi_soft "$t" && SUBARCH=${SUBARCH}-sf
 trycppif __riscv_float_abi_single "$t" && SUBARCH=${SUBARCH}-sp
 fi
@@ -759,6 +741,11 @@ fi
 
 test "$SUBARCH" \
 && printf "configured for %s variant: %s\n" "$ARCH" "$ARCH$SUBARCH"
+
+case "$ARCH$SUBARCH" in
+arm) ASMSUBARCH=el ;;
+*) ASMSUBARCH=$SUBARCH ;;
+esac
 
 #
 # Some archs (powerpc) have different possible long double formats
@@ -827,6 +814,7 @@ LDFLAGS_AUTO = $LDFLAGS_AUTO
 CROSS_COMPILE = $CROSS_COMPILE
 LIBCC = $LIBCC
 OPTIMIZE_GLOBS = $OPTIMIZE_GLOBS
+ENABLE_BACKTRACE = $ENABLE_BACKTRACE
 ALL_TOOLS = $tools
 TOOL_LIBS = $tool_libs
 ADD_CFI = $ADD_CFI
