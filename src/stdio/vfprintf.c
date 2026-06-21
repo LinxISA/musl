@@ -178,6 +178,119 @@ static char *fmt_u(uintmax_t x, char *s)
 typedef char compiler_defines_long_double_incorrectly[9-(int)sizeof(long double)];
 #endif
 
+static int fmt_fp_fixed(FILE *f, long double y, int w, int p, int fl, const char *prefix, int pl)
+{
+#if LDBL_MANT_DIG == DBL_MANT_DIG && LDBL_MAX_EXP == DBL_MAX_EXP
+	static const unsigned long long pow10[] = {
+		1ULL,
+		10ULL,
+		100ULL,
+		1000ULL,
+		10000ULL,
+		100000ULL,
+		1000000ULL,
+		10000000ULL,
+		100000000ULL,
+		1000000000ULL,
+		10000000000ULL,
+		100000000000ULL,
+		1000000000000ULL,
+		10000000000000ULL,
+		100000000000000ULL,
+		1000000000000000ULL,
+		10000000000000000ULL,
+		100000000000000000ULL,
+		1000000000000000000ULL,
+	};
+	static const unsigned long long pow5[] = {
+		1ULL,
+		5ULL,
+		25ULL,
+		125ULL,
+		625ULL,
+		3125ULL,
+		15625ULL,
+		78125ULL,
+		390625ULL,
+		1953125ULL,
+		9765625ULL,
+		48828125ULL,
+		244140625ULL,
+		1220703125ULL,
+		6103515625ULL,
+		30517578125ULL,
+		152587890625ULL,
+		762939453125ULL,
+		3814697265625ULL,
+	};
+	union { double f; uint64_t i; } u = { (double)y };
+	uint64_t bits = u.i;
+	uint64_t frac = bits & ((1ULL<<52)-1);
+	int bexp = (int)(bits >> 52 & 0x7ff);
+	uint64_t mant, hi, lo, q, rem, half;
+	int e2;
+	unsigned __int128 n;
+	unsigned long long scale, frac_part;
+	char ibuf[sizeof(uintmax_t)*3], fbuf[18], *is;
+	int ilen, l, i, shift;
+
+	if (p < 0 || p > 18) return -1;
+	if (bits >> 63) return -1;
+
+	if (!bexp) {
+		mant = frac;
+		e2 = -1074;
+	} else {
+		mant = (1ULL<<52) | frac;
+		e2 = bexp - 1023 - 52;
+	}
+
+	n = (unsigned __int128)mant * pow5[p];
+	shift = e2 + p;
+	if (shift >= 0 || shift <= -64) return -1;
+
+	hi = n >> 64;
+	lo = n;
+	i = -shift;
+	if (hi >> i) return -1;
+	q = (hi << (64-i)) | (lo >> i);
+	rem = lo & ((1ULL << i) - 1);
+	half = 1ULL << (i-1);
+	if (rem > half || (rem == half && (q & 1))) {
+		if (q == ULLONG_MAX) return -1;
+		q++;
+	}
+
+	scale = pow10[p];
+	frac_part = q % scale;
+	q /= scale;
+
+	is = q ? fmt_u(q, ibuf+sizeof ibuf) : ibuf+sizeof ibuf;
+	if (!q) *--is = '0';
+	ilen = ibuf+sizeof ibuf - is;
+	if (p > INT_MAX - ilen - !!(p || (fl&ALT_FORM)))
+		return -1;
+	l = ilen + p + !!(p || (fl&ALT_FORM));
+	if (l > INT_MAX-pl)
+		return -1;
+
+	pad(f, ' ', w, pl+l, fl);
+	out(f, prefix, pl);
+	pad(f, '0', w, pl+l, fl^ZERO_PAD);
+	out(f, is, ilen);
+	if (p || (fl&ALT_FORM)) out(f, ".", 1);
+	for (i=p; i; i--) {
+		fbuf[i-1] = '0' + frac_part%10;
+		frac_part /= 10;
+	}
+	if (p) out(f, fbuf, p);
+	pad(f, ' ', w, pl+l, fl^LEFT_ADJ);
+	return MAX(w, pl+l);
+#else
+	return -1;
+#endif
+}
+
 static int fmt_fp(FILE *f, long double y, int w, int p, int fl, int t, int ps)
 {
 	int max_mant_dig = (ps==BIGLPRE) ? LDBL_MANT_DIG : DBL_MANT_DIG;
@@ -212,6 +325,11 @@ static int fmt_fp(FILE *f, long double y, int w, int p, int fl, int t, int ps)
 		out(f, s, 3);
 		pad(f, ' ', w, 3+pl, fl^LEFT_ADJ);
 		return MAX(w, 3+pl);
+	}
+
+	if ((t|32)=='f') {
+		l = fmt_fp_fixed(f, y, w, p<0 ? 6 : p, fl, prefix, pl);
+		if (l >= 0) return l;
 	}
 
 	y = frexpl(y, &e2) * 2;

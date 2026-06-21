@@ -1975,14 +1975,16 @@ void __dls3(size_t *sp, size_t *auxv)
 	/* Initial dso chain consists only of the app. */
 	head = tail = syms_tail = &app;
 
-	/* Donate unused parts of app and library mapping to malloc */
+	/* Donate unused parts of app and library mapping to malloc. */
+#ifndef __LINX__
 	reclaim_gaps(&app);
 	reclaim_gaps(&ldso);
+#endif
 
 	/* Load preload/needed libraries, add symbols to global namespace. */
 	ldso.deps = (struct dso **)no_deps;
 	if (env_preload) load_preload(env_preload);
- 	load_deps(&app);
+	load_deps(&app);
 	for (struct dso *p=head; p; p=p->next)
 		add_syms(p);
 

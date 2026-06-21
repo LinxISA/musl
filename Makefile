@@ -128,9 +128,7 @@ obj/crt/crt1.o obj/crt/scrt1.o obj/crt/rcrt1.o obj/ldso/dlstart.lo: $(srcdir)/ar
 
 obj/crt/rcrt1.o: $(srcdir)/ldso/dlstart.c
 
-ifeq (,$(filter $(ARCH), linx64 linx64v4 linx64v5))
 obj/crt/Scrt1.o obj/crt/rcrt1.o: CFLAGS_ALL += -fPIC
-endif
 
 OPTIMIZE_SRCS = $(wildcard $(OPTIMIZE_GLOBS:%=$(srcdir)/src/%))
 $(OPTIMIZE_SRCS:$(srcdir)/%.c=obj/%.o) $(OPTIMIZE_SRCS:$(srcdir)/%.c=obj/%.lo): CFLAGS += -O3
@@ -146,9 +144,7 @@ $(NOSSP_OBJS) $(NOSSP_OBJS:%.o=%.lo): CFLAGS_ALL += $(CFLAGS_NOSSP)
 
 $(CRT_OBJS): CFLAGS_ALL += -DCRT
 
-ifeq (,$(filter $(ARCH), linx64 linx64v4 linx64v5))
 $(LOBJS) $(LDSO_OBJS): CFLAGS_ALL += -fPIC
-endif
 
 $(DEBUG_AOBJS): CFLAGS_ALL+= -fno-omit-frame-pointer -funwind-tables
 $(DEBUG_LOBJS): CFLAGS_ALL+= -fno-omit-frame-pointer -funwind-tables -fPIC

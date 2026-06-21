@@ -43,5 +43,12 @@ _Noreturn void exit(int code)
 	__funcs_on_exit();
 	__libc_exit_fini();
 	__stdio_exit();
+#ifdef __LINX__
+	for (;;) {
+		__syscall(SYS_exit, code);
+		__syscall(SYS_exit_group, code);
+	}
+#else
 	_Exit(code);
+#endif
 }
