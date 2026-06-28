@@ -15,6 +15,22 @@
 #define realloc __libc_realloc
 #define free __libc_free
 
+#if defined(__LINX__)
+static size_t malloc_page_size(void)
+{
+	/*
+	 * Linx C++ static startup can reach oldmalloc before __init_libc()
+	 * has copied AT_PAGESZ into libc.page_size. Keep early allocator
+	 * growth page-aligned instead of rounding requests down to zero.
+	 */
+	return PAGE_SIZE ? PAGE_SIZE : 4096;
+}
+#else
+#define malloc_page_size() PAGE_SIZE
+#endif
+
+#define MALLOC_PAGE_SIZE (malloc_page_size())
+
 #if defined(__GNUC__) && defined(__PIC__)
 #define inline inline __attribute__((always_inline))
 #endif
@@ -165,15 +181,15 @@ static void *__expand_heap(size_t *pn)
 	static unsigned mmap_step;
 	size_t n = *pn;
 
-	if (n > SIZE_MAX/2 - PAGE_SIZE) {
+	if (n > SIZE_MAX/2 - MALLOC_PAGE_SIZE) {
 		errno = ENOMEM;
 		return 0;
 	}
-	n += -n & PAGE_SIZE-1;
+	n += -n & MALLOC_PAGE_SIZE-1;
 
 	if (!brk) {
 		brk = __syscall(SYS_brk, 0);
-		brk += -brk & PAGE_SIZE-1;
+		brk += -brk & MALLOC_PAGE_SIZE-1;
 	}
 
 	if (n < SIZE_MAX-brk && !traverses_stack_p(brk, brk+n)
@@ -183,7 +199,7 @@ static void *__expand_heap(size_t *pn)
 		return (void *)(brk-n);
 	}
 
-	size_t min = (size_t)PAGE_SIZE << mmap_step/2;
+	size_t min = (size_t)MALLOC_PAGE_SIZE << mmap_step/2;
 	if (n < min) n = min;
 	void *area = __mmap(0, n, PROT_READ|PROT_WRITE,
 		MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
@@ -234,7 +250,7 @@ static struct chunk *expand_heap(size_t n)
 static int adjust_size(size_t *n)
 {
 	/* Result of pointer difference must fit in ptrdiff_t. */
-	if (*n-1 > PTRDIFF_MAX - SIZE_ALIGN - PAGE_SIZE) {
+	if (*n-1 > PTRDIFF_MAX - SIZE_ALIGN - MALLOC_PAGE_SIZE) {
 		if (*n) {
 			errno = ENOMEM;
 			return -1;
@@ -299,7 +315,7 @@ void *malloc(size_t n)
 	if (adjust_size(&n) < 0) return 0;
 
 	if (n > MMAP_THRESHOLD) {
-		size_t len = n + OVERHEAD + PAGE_SIZE - 1 & -PAGE_SIZE;
+		size_t len = n + OVERHEAD + MALLOC_PAGE_SIZE - 1 & -MALLOC_PAGE_SIZE;
 		char *base = __mmap(0, len, PROT_READ|PROT_WRITE,
 			MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 		if (base == (void *)-1) return 0;
@@ -371,11 +387,11 @@ void *realloc(void *p, size_t n)
 		size_t newlen = n + extra;
 		/* Crash on realloc of freed chunk */
 		if (extra & 1) a_crash();
-		if (newlen < PAGE_SIZE && (new = malloc(n-OVERHEAD))) {
+		if (newlen < MALLOC_PAGE_SIZE && (new = malloc(n-OVERHEAD))) {
 			n0 = n;
 			goto copy_free_ret;
 		}
-		newlen = (newlen + PAGE_SIZE-1) & -PAGE_SIZE;
+		newlen = (newlen + MALLOC_PAGE_SIZE-1) & -MALLOC_PAGE_SIZE;
 		if (oldlen == newlen) return p;
 		base = __mremap(base, oldlen, newlen, MREMAP_MAYMOVE);
 		if (base == (void *)-1)
@@ -479,8 +495,8 @@ void __bin_chunk(struct chunk *self)
 
 	/* Replace middle of large chunks with fresh zero pages */
 	if (size > RECLAIM && (size^(size-osize)) > size-osize) {
-		uintptr_t a = (uintptr_t)self + SIZE_ALIGN+PAGE_SIZE-1 & -PAGE_SIZE;
-		uintptr_t b = (uintptr_t)next - SIZE_ALIGN & -PAGE_SIZE;
+		uintptr_t a = (uintptr_t)self + SIZE_ALIGN+MALLOC_PAGE_SIZE-1 & -MALLOC_PAGE_SIZE;
+		uintptr_t b = (uintptr_t)next - SIZE_ALIGN & -MALLOC_PAGE_SIZE;
 		int e = errno;
 #if 1
 		__madvise((void *)a, b-a, MADV_DONTNEED);
