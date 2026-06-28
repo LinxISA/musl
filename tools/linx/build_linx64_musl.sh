@@ -75,6 +75,7 @@ fi
 MAKE_LOG_RE='[[:alpha:]]*make: \*\*\* .*obj/[^ ]+.*Error'
 
 CC_CMD="$CLANG --target=$TARGET -fuse-ld=lld"
+EMPTY_LIB_NAMES=(m rt pthread crypt util xnet resolv dl)
 
 build_runtime_builtins() {
   local -a srcs=(
@@ -444,6 +445,9 @@ while true; do
   # - rcrt1.o is required for static PIE (self-relocating crt1).
   # - Scrt1.o is the dynamic/PIE startup object.
   make_cmd+=(lib/libc.a lib/crt1.o lib/rcrt1.o lib/Scrt1.o lib/crti.o lib/crtn.o)
+  for lib in "${EMPTY_LIB_NAMES[@]}"; do
+    make_cmd+=("lib/lib${lib}.a")
+  done
 
   if (
     cd "$BUILD_DIR"
@@ -551,6 +555,10 @@ fi
 mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/usr/lib"
 install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/lib/libc.a"
 install -m 644 "$BUILD_DIR/lib/libc.a" "$INSTALL_DIR/usr/lib/libc.a"
+for lib in "${EMPTY_LIB_NAMES[@]}"; do
+  install -m 644 "$BUILD_DIR/lib/lib${lib}.a" "$INSTALL_DIR/lib/lib${lib}.a"
+  install -m 644 "$BUILD_DIR/lib/lib${lib}.a" "$INSTALL_DIR/usr/lib/lib${lib}.a"
+done
 install -m 644 "$BUILD_DIR/lib/crt1.o" "$INSTALL_DIR/lib/crt1.o"
 install -m 644 "$BUILD_DIR/lib/rcrt1.o" "$INSTALL_DIR/lib/rcrt1.o"
 install -m 644 "$BUILD_DIR/lib/Scrt1.o" "$INSTALL_DIR/lib/Scrt1.o"
