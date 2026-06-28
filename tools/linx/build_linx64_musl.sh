@@ -15,7 +15,9 @@ MUSL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 
 LINX_ISA_ROOT="${LINX_ISA_ROOT:-/Users/zhoubot/linx-isa}"
 TARGET="${TARGET:-linx64-unknown-linux-musl}"
-MALLOC_IMPL="${MALLOC_IMPL:-oldmalloc}"
+# Use musl's current allocator for Linx runtime/SPEC bring-up. oldmalloc remains
+# available via MALLOC_IMPL=oldmalloc for targeted allocator bisection.
+MALLOC_IMPL="${MALLOC_IMPL:-mallocng}"
 
 LLVM_BIN="${LLVM_BIN:-$LINX_ISA_ROOT/compiler/llvm/build-linxisa-clang/bin}"
 CLANG="${CLANG:-$LLVM_BIN/clang}"
