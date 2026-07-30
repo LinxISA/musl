@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 
 
 EXPECTED_DESCRIPTOR = (
@@ -125,11 +128,26 @@ def check_fixtures() -> None:
                 f"fixture {name} expected {expected}, got {actual}")
 
 
+def run_c_harness(repo: pathlib.Path) -> None:
+    cc = shutil.which("cc")
+    require(cc is not None, "host C compiler 'cc' missing")
+    source = repo / "tools/linx/pto_isa_identity_harness.c"
+    with tempfile.TemporaryDirectory(prefix="pto-isa-identity-") as tmp:
+        exe = pathlib.Path(tmp) / "pto_isa_identity_harness"
+        subprocess.run(
+            [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(exe)],
+            cwd=repo,
+            check=True,
+        )
+        subprocess.run([str(exe)], cwd=repo, check=True)
+
+
 def main() -> int:
     repo = pathlib.Path(__file__).resolve().parents[2]
     elf_h = read(repo, "include/elf.h")
     reloc_h = read(repo, "arch/linx64/reloc.h")
     dynlink = read(repo, "ldso/dynlink.c")
+    identity_h = read(repo, "ldso/pto_isa_identity.h")
     configure = read(repo, "configure")
     build_script = read(repo, "tools/linx/build_linx64_musl.sh")
 
@@ -148,13 +166,19 @@ def main() -> int:
     require(descriptor == EXPECTED_DESCRIPTOR,
             "PTO descriptor is not byte-exact")
     require("PTO_NOTE_SCAN_MAX 4096" in dynlink, "4KiB scan cap missing")
-    require("pread(fd" in dynlink and "p_offset" in dynlink and "p_filesz" in dynlink,
-            "fd PT_NOTE path must use p_offset/p_filesz pread")
-    require("pto_note_range_loaded" in dynlink and "PT_LOAD" in dynlink,
+    require("pread(fd, buf, len, (off_t)off)" in dynlink,
+            "fd PT_NOTE path must use positioned pread")
+    require("PTO_ISA_OFFSET_MAX" in dynlink and "LLONG_MAX" in dynlink,
+            "fd PT_NOTE path must bound unsigned p_offset to off_t")
+    require("errno == EINTR" in identity_h and "done += l" in identity_h,
+            "fd PT_NOTE path must handle EINTR and short reads")
+    require("if (ph->p_align != 4) continue;" in identity_h,
+            "unrelated non-4 PT_NOTE segments must be skipped, not rejected")
+    require("pto_isa_note_range_loaded" in identity_h and "PT_LOAD" in identity_h,
             "mapped main path must validate PT_LOAD range")
-    require("ph->p_filesz > ph->p_memsz" in dynlink,
+    require("ph->p_filesz > ph->p_memsz" in identity_h,
             "mapped PT_NOTE path must reject p_filesz larger than p_memsz")
-    require("laddr(dso, ph->p_vaddr), ph->p_filesz" in dynlink,
+    require("map_addr(ctx, ph->p_vaddr)" in identity_h and "ph->p_filesz" in identity_h,
             "mapped PT_NOTE path must parse p_filesz, not p_memsz")
     require("pto_check_loaded_objects();" in dynlink,
             "startup closure check missing")
@@ -168,6 +192,7 @@ def main() -> int:
             "build gate does not run PTO identity guard")
 
     check_fixtures()
+    run_c_harness(repo)
     print("ok: Linx musl PTO ISA identity wiring matches 0.57.1")
     return 0
 
