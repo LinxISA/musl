@@ -87,6 +87,8 @@ struct dso {
 	char relocated;
 	char constructed;
 	char kernel_mapped;
+	char pto_isa_identity_valid;
+	char pto_isa_identity_invalid;
 	char mark;
 	char bfs_built;
 	char runtime_loaded;
@@ -156,6 +158,15 @@ static struct dso *builtin_ctor_queue[4];
 static struct dso **main_ctor_queue;
 static struct fdpic_loadmap *app_loadmap;
 static struct fdpic_dummy_loadmap app_dummy_loadmap;
+
+#ifdef __LINX__
+#define PTO_ISA_IDENTITY_JSON \
+	"{\"encoding_abi\":\"pto-isa-0.57.1-mode-function-v1\"," \
+	"\"encoding_projection_sha256\":" \
+	"\"34f6602cf29ea6363d41d896111dad4de0f70ec36517138aa89e292857909da4\"," \
+	"\"release\":\"0.57.1\"}"
+#define PTO_NOTE_SCAN_MAX 4096
+#endif
 
 struct debug *_dl_debug_addr = &debug;
 
@@ -702,6 +713,140 @@ static void unmap_library(struct dso *dso)
 	}
 }
 
+#ifdef __LINX__
+static void pto_note_reject(struct dso *dso)
+{
+	dso->pto_isa_identity_valid = 0;
+	dso->pto_isa_identity_invalid = 1;
+}
+
+static int pto_add_overflow(size_t a, size_t b, size_t *out)
+{
+	*out = a + b;
+	return *out < a;
+}
+
+static int pto_process_note_bytes(struct dso *dso, const unsigned char *buf, size_t len)
+{
+	size_t off = 0;
+	while (off < len) {
+		if (len - off < sizeof(ElfW(Nhdr))) {
+			pto_note_reject(dso);
+			return -1;
+		}
+		const ElfW(Nhdr) *note = (const void *)(buf + off);
+		size_t name_off = off + sizeof *note;
+		size_t name_size = (note->n_namesz + 3) & -4;
+		size_t desc_off, desc_size, next;
+		if (name_size < note->n_namesz
+		    || pto_add_overflow(name_off, name_size, &desc_off)
+		    || (desc_size = (note->n_descsz + 3) & -4) < note->n_descsz
+		    || pto_add_overflow(desc_off, desc_size, &next)
+		    || next <= off || next > len
+		    || desc_off > len || note->n_descsz > len - desc_off) {
+			pto_note_reject(dso);
+			return -1;
+		}
+		if (note->n_namesz == 4 && note->n_type == PTO_NT_ISA_IDENTITY
+		    && !memcmp(buf + name_off, ELF_NOTE_PTO, 4)) {
+			const char *desc = (const char *)buf + desc_off;
+			size_t expected_len = sizeof PTO_ISA_IDENTITY_JSON - 1;
+			if (note->n_descsz != expected_len
+			    || memcmp(desc, PTO_ISA_IDENTITY_JSON, expected_len)) {
+				pto_note_reject(dso);
+				return -1;
+			}
+			dso->pto_isa_identity_valid = 1;
+		}
+		off = next;
+	}
+	return 0;
+}
+
+static int pto_note_range_loaded(struct dso *dso, const Phdr *note_ph, size_t len)
+{
+	size_t start, end;
+	if (pto_add_overflow((size_t)dso->base, note_ph->p_vaddr, &start)
+	    || pto_add_overflow(start, len, &end))
+		return 0;
+
+	Phdr *ph = dso->phdr;
+	for (size_t i=dso->phnum; i; i--, ph=(void *)((char *)ph+dso->phentsize)) {
+		size_t seg_start, seg_end;
+		if (ph->p_type != PT_LOAD) continue;
+		if (pto_add_overflow((size_t)dso->base, ph->p_vaddr, &seg_start)
+		    || pto_add_overflow(seg_start, ph->p_memsz, &seg_end))
+			continue;
+		if (start >= seg_start && end <= seg_end) return 1;
+	}
+	return 0;
+}
+
+static void pto_process_fd_notes(int fd, struct dso *dso, Phdr *ph0, size_t phnum, size_t phentsize)
+{
+	unsigned char buf[PTO_NOTE_SCAN_MAX] __attribute__((aligned(_Alignof(ElfW(Nhdr)))));
+	Phdr *ph = ph0;
+	for (size_t i=phnum; i; i--, ph=(void *)((char *)ph+phentsize)) {
+		if (ph->p_type != PT_NOTE) continue;
+		if (ph->p_align != 4 || ph->p_filesz > sizeof buf) {
+			pto_note_reject(dso);
+			return;
+		}
+		if (!ph->p_filesz) continue;
+		ssize_t l = pread(fd, buf, ph->p_filesz, ph->p_offset);
+		if (l != ph->p_filesz) {
+			pto_note_reject(dso);
+			return;
+		}
+		if (pto_process_note_bytes(dso, buf, ph->p_filesz) < 0) return;
+	}
+}
+
+static void pto_process_mapped_notes(struct dso *dso)
+{
+	Phdr *ph = dso->phdr;
+	for (size_t i=dso->phnum; i; i--, ph=(void *)((char *)ph+dso->phentsize)) {
+		if (ph->p_type != PT_NOTE) continue;
+		if (ph->p_align != 4 || ph->p_filesz > ph->p_memsz
+		    || ph->p_filesz > PTO_NOTE_SCAN_MAX
+		    || !pto_note_range_loaded(dso, ph, ph->p_filesz)) {
+			pto_note_reject(dso);
+			return;
+		}
+		if (!ph->p_filesz) continue;
+		if (pto_process_note_bytes(dso, laddr(dso, ph->p_vaddr), ph->p_filesz) < 0)
+			return;
+	}
+}
+
+static void pto_check_dso(struct dso *p)
+{
+	if (p == &ldso || !p->name) return;
+	if (p->pto_isa_identity_valid && !p->pto_isa_identity_invalid) return;
+	error("PTO ISA identity note missing or invalid in %s", p->name[0] ? p->name : "main program");
+	if (runtime) longjmp(*rtld_fail, 1);
+}
+
+static void pto_check_loaded_objects(void)
+{
+	for (struct dso *p=head; p; p=p->next)
+		if (p != &ldso && (!p->shortname || strcmp(p->shortname, "linux-gate.so.1")))
+			pto_check_dso(p);
+}
+
+static void pto_check_dependency_closure(struct dso *p)
+{
+	pto_check_dso(p);
+	if (p->deps) for (size_t i=0; p->deps[i]; i++)
+		pto_check_dso(p->deps[i]);
+}
+#else
+#define pto_process_fd_notes(fd, dso, ph0, phnum, phentsize) ((void)0)
+#define pto_process_mapped_notes(dso) ((void)0)
+#define pto_check_loaded_objects() ((void)0)
+#define pto_check_dependency_closure(p) ((void)0)
+#endif
+
 static void *map_library(int fd, struct dso *dso)
 {
 	Ehdr buf[(896+sizeof(Ehdr))/sizeof(Ehdr)];
@@ -878,6 +1023,7 @@ done_mapping:
 	dso->base = base;
 	dso->dynv = laddr(dso, dyn);
 	if (dso->tls.size) dso->tls.image = laddr(dso, tls_image);
+	pto_process_fd_notes(fd, dso, ph0, eh->e_phnum, eh->e_phentsize);
 	free(allocated_buf);
 	return map;
 noexec:
@@ -1485,6 +1631,7 @@ static void kernel_mapped_dso(struct dso *p)
 	p->map = p->base + min_addr;
 	p->map_len = max_addr - min_addr;
 	p->kernel_mapped = 1;
+	pto_process_mapped_notes(p);
 }
 
 void __libc_exit_fini()
@@ -1985,6 +2132,8 @@ void __dls3(size_t *sp, size_t *auxv)
 	ldso.deps = (struct dso **)no_deps;
 	if (env_preload) load_preload(env_preload);
 	load_deps(&app);
+	pto_check_loaded_objects();
+	if (ldso_fail) _exit(127);
 	for (struct dso *p=head; p; p=p->next)
 		add_syms(p);
 
@@ -2208,6 +2357,7 @@ void *dlopen(const char *file, int mode)
 	/* First load handling */
 	load_deps(p);
 	extend_bfs_deps(p);
+	pto_check_dependency_closure(p);
 	pthread_mutex_lock(&init_fini_lock);
 	int constructed = p->constructed;
 	pthread_mutex_unlock(&init_fini_lock);
