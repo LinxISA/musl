@@ -1111,6 +1111,9 @@ typedef struct {
 #define NT_GNU_GOLD_VERSION	4
 #define NT_GNU_PROPERTY_TYPE_0	5
 
+#define ELF_NOTE_PTO	"PTO"
+#define PTO_NT_ISA_IDENTITY	1
+
 
 
 typedef struct {
@@ -3276,11 +3279,11 @@ enum
 #define R_LINX_HL_PCR29_LOAD   20
 #define R_LINX_HL_PCR29_STORE  21
 #define R_LINX_B25_PCREL       22
-#define R_LINX_TLS_DTPMOD64    23
-#define R_LINX_TLS_DTPREL64    24
-#define R_LINX_TLS_TPREL64     25
-#define R_LINX_TLSDESC         26
-#define R_LINX_IRELATIVE       27
+#define R_LINX_TLS_DTPMOD64    28
+#define R_LINX_TLS_DTPREL64    29
+#define R_LINX_TLS_TPREL64     30
+#define R_LINX_TLSDESC         31
+#define R_LINX_IRELATIVE       32
 
 #define R_RISCV_NONE            0
 #define R_RISCV_32              1

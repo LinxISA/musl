@@ -87,6 +87,8 @@ struct dso {
 	char relocated;
 	char constructed;
 	char kernel_mapped;
+	char pto_isa_identity_valid;
+	char pto_isa_identity_invalid;
 	char mark;
 	char bfs_built;
 	char runtime_loaded;
@@ -156,6 +158,17 @@ static struct dso *builtin_ctor_queue[4];
 static struct dso **main_ctor_queue;
 static struct fdpic_loadmap *app_loadmap;
 static struct fdpic_dummy_loadmap app_dummy_loadmap;
+
+#ifdef __LINX__
+#define PTO_ISA_IDENTITY_JSON \
+	"{\"encoding_abi\":\"pto-isa-0.57.1-mode-function-v1\"," \
+	"\"encoding_projection_sha256\":" \
+	"\"9705a984e2e48e0d4e856d3fbcfa07041c8578dd326d81f1c90279e826354c32\"," \
+	"\"release\":\"0.57.1\"}"
+#define PTO_NOTE_SCAN_MAX 4096
+#define PTO_ISA_OFFSET_MAX ((uintmax_t)LLONG_MAX)
+#include "pto_isa_identity.h"
+#endif
 
 struct debug *_dl_debug_addr = &debug;
 
@@ -702,6 +715,70 @@ static void unmap_library(struct dso *dso)
 	}
 }
 
+#ifdef __LINX__
+static ssize_t pto_dso_read_at(void *ctx, unsigned char *buf, size_t len, uintmax_t off)
+{
+	int fd = (int)(intptr_t)ctx;
+	return pread(fd, buf, len, (off_t)off);
+}
+
+static void pto_process_fd_notes(int fd, struct dso *dso, Phdr *ph0, size_t phnum, size_t phentsize)
+{
+	struct pto_isa_identity_state state = {
+		dso->pto_isa_identity_valid,
+		dso->pto_isa_identity_invalid
+	};
+	pto_isa_process_fd_notes(&state, ph0, phnum, phentsize,
+		pto_dso_read_at, (void *)(intptr_t)fd);
+	dso->pto_isa_identity_valid = state.valid;
+	dso->pto_isa_identity_invalid = state.invalid;
+}
+
+static const unsigned char *pto_dso_laddr(void *ctx, size_t vaddr)
+{
+	return laddr((struct dso *)ctx, vaddr);
+}
+
+static void pto_process_mapped_notes(struct dso *dso)
+{
+	struct pto_isa_identity_state state = {
+		dso->pto_isa_identity_valid,
+		dso->pto_isa_identity_invalid
+	};
+	pto_isa_process_mapped_notes(&state, dso->phdr, dso->phnum,
+		dso->phentsize, (size_t)dso->base, pto_dso_laddr, dso);
+	dso->pto_isa_identity_valid = state.valid;
+	dso->pto_isa_identity_invalid = state.invalid;
+}
+
+static void pto_check_dso(struct dso *p)
+{
+	if (p == &ldso || !p->name) return;
+	if (p->pto_isa_identity_valid && !p->pto_isa_identity_invalid) return;
+	error("PTO ISA identity note missing or invalid in %s", p->name[0] ? p->name : "main program");
+	if (runtime) longjmp(*rtld_fail, 1);
+}
+
+static void pto_check_loaded_objects(void)
+{
+	for (struct dso *p=head; p; p=p->next)
+		if (p != &ldso && (!p->shortname || strcmp(p->shortname, "linux-gate.so.1")))
+			pto_check_dso(p);
+}
+
+static void pto_check_dependency_closure(struct dso *p)
+{
+	pto_check_dso(p);
+	if (p->deps) for (size_t i=0; p->deps[i]; i++)
+		pto_check_dso(p->deps[i]);
+}
+#else
+#define pto_process_fd_notes(fd, dso, ph0, phnum, phentsize) ((void)0)
+#define pto_process_mapped_notes(dso) ((void)0)
+#define pto_check_loaded_objects() ((void)0)
+#define pto_check_dependency_closure(p) ((void)0)
+#endif
+
 static void *map_library(int fd, struct dso *dso)
 {
 	Ehdr buf[(896+sizeof(Ehdr))/sizeof(Ehdr)];
@@ -878,6 +955,7 @@ done_mapping:
 	dso->base = base;
 	dso->dynv = laddr(dso, dyn);
 	if (dso->tls.size) dso->tls.image = laddr(dso, tls_image);
+	pto_process_fd_notes(fd, dso, ph0, eh->e_phnum, eh->e_phentsize);
 	free(allocated_buf);
 	return map;
 noexec:
@@ -1485,6 +1563,7 @@ static void kernel_mapped_dso(struct dso *p)
 	p->map = p->base + min_addr;
 	p->map_len = max_addr - min_addr;
 	p->kernel_mapped = 1;
+	pto_process_mapped_notes(p);
 }
 
 void __libc_exit_fini()
@@ -1985,6 +2064,8 @@ void __dls3(size_t *sp, size_t *auxv)
 	ldso.deps = (struct dso **)no_deps;
 	if (env_preload) load_preload(env_preload);
 	load_deps(&app);
+	pto_check_loaded_objects();
+	if (ldso_fail) _exit(127);
 	for (struct dso *p=head; p; p=p->next)
 		add_syms(p);
 
@@ -2208,6 +2289,7 @@ void *dlopen(const char *file, int mode)
 	/* First load handling */
 	load_deps(p);
 	extend_bfs_deps(p);
+	pto_check_dependency_closure(p);
 	pthread_mutex_lock(&init_fini_lock);
 	int constructed = p->constructed;
 	pthread_mutex_unlock(&init_fini_lock);

@@ -50,6 +50,8 @@ PHASE_C_CRTEND="$PHASE_C_CRT_DIR/crtendS.o"
 
 mkdir -p "$LOG_DIR" "$OUT_ROOT/build" "$OUT_ROOT/install"
 
+python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py"
+
 CONFIG_LOG="$LOG_DIR/${MODE}-configure.log"
 M2_LOG="$LOG_DIR/${MODE}-m2-libc-a.log"
 M3_LOG="$LOG_DIR/${MODE}-m3-shared.log"
