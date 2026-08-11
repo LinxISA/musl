@@ -31,10 +31,10 @@ typedef Elf64_Phdr Phdr;
 #define ELF_NOTE_PTO "PTO"
 #define PTO_NT_ISA_IDENTITY 1
 #define PTO_ISA_IDENTITY_JSON \
-	"{\"encoding_abi\":\"pto-isa-0.57.1-mode-function-v1\"," \
+	"{\"encoding_abi\":\"pto-isa-0.58.0-mode-function-v1\"," \
 	"\"encoding_projection_sha256\":" \
-	"\"9705a984e2e48e0d4e856d3fbcfa07041c8578dd326d81f1c90279e826354c32\"," \
-	"\"release\":\"0.57.1\"}"
+	"\"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa\"," \
+	"\"release\":\"0.58.0\"}"
 #define PTO_NOTE_SCAN_MAX 4096
 #define PTO_ISA_OFFSET_MAX ((uintmax_t)INT64_MAX)
 
@@ -195,6 +195,13 @@ int main(void)
 		good_len + mismatch_len, 4);
 	fails += run_fd_case("conflict", file, good_len + mismatch_len, &conflict, 1,
 		(struct read_ctx){0}, 0, 1);
+
+	memset(file, 0, sizeof file);
+	memcpy(file, good, good_len);
+	memcpy(file + good_len, good, good_len);
+	Phdr duplicate = note_phdr(0, 0, good_len * 2, good_len * 2, 4);
+	fails += run_fd_case("duplicate-identical", file, good_len * 2,
+		&duplicate, 1, (struct read_ctx){0}, 0, 1);
 
 	memset(file, 0, sizeof file);
 	memcpy(file, trailing_nul, trailing_nul_len);

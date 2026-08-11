@@ -161,10 +161,10 @@ static struct fdpic_dummy_loadmap app_dummy_loadmap;
 
 #ifdef __LINX__
 #define PTO_ISA_IDENTITY_JSON \
-	"{\"encoding_abi\":\"pto-isa-0.57.1-mode-function-v1\"," \
+	"{\"encoding_abi\":\"pto-isa-0.58.0-mode-function-v1\"," \
 	"\"encoding_projection_sha256\":" \
-	"\"9705a984e2e48e0d4e856d3fbcfa07041c8578dd326d81f1c90279e826354c32\"," \
-	"\"release\":\"0.57.1\"}"
+	"\"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa\"," \
+	"\"release\":\"0.58.0\"}"
 #define PTO_NOTE_SCAN_MAX 4096
 #define PTO_ISA_OFFSET_MAX ((uintmax_t)LLONG_MAX)
 #include "pto_isa_identity.h"

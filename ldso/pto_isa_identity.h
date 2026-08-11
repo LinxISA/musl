@@ -56,7 +56,7 @@ static int pto_isa_note_bytes(struct pto_isa_identity_state *state,
 		    && !memcmp(buf + name_off, ELF_NOTE_PTO, 4)) {
 			const char *desc = (const char *)buf + desc_off;
 			size_t expected_len = sizeof PTO_ISA_IDENTITY_JSON - 1;
-			if (note->n_descsz != expected_len
+			if (state->valid || note->n_descsz != expected_len
 			    || memcmp(desc, PTO_ISA_IDENTITY_JSON, expected_len)) {
 				pto_isa_reject(state);
 				return -1;
