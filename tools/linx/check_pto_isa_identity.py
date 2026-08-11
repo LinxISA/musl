@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Linx musl PTO ISA 0.57.1 identity wiring."""
+"""Check Linx musl PTO ISA 0.58.0 identity wiring."""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ import tempfile
 
 
 EXPECTED_DESCRIPTOR = (
-    '{"encoding_abi":"pto-isa-0.57.1-mode-function-v1",'
+    '{"encoding_abi":"pto-isa-0.58.0-mode-function-v1",'
     '"encoding_projection_sha256":'
-    '"9705a984e2e48e0d4e856d3fbcfa07041c8578dd326d81f1c90279e826354c32",'
-    '"release":"0.57.1"}'
+    '"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa",'
+    '"release":"0.58.0"}'
 )
 
 EXPECTED_RELOCS = {
@@ -68,7 +68,7 @@ def parse_fixture(payload: bytes) -> tuple[bool, bool]:
         name = payload[name_off:name_off + namesz]
         desc = payload[desc_off:desc_off + descsz]
         if namesz == len(NOTE_NAME) and note_type == NOTE_TYPE and name == NOTE_NAME:
-            if desc != EXPECTED_DESCRIPTOR.encode():
+            if valid or desc != EXPECTED_DESCRIPTOR.encode():
                 return False, True
             valid = True
         off = next_off
@@ -106,7 +106,7 @@ def check_fixtures() -> None:
     mismatch = make_note(
         NOTE_NAME,
         NOTE_TYPE,
-        EXPECTED_DESCRIPTOR.replace('"release":"0.57.1"', '"release":"0.58.0"')
+        EXPECTED_DESCRIPTOR.replace('"release":"0.58.0"', '"release":"0.57.1"')
         .encode(),
     )
     other = make_note(b"GNU\0", 3, b"build-id")
@@ -115,6 +115,7 @@ def check_fixtures() -> None:
         "missing": (other, (False, False)),
         "mismatch": (mismatch, (False, True)),
         "conflict": (good + mismatch, (False, True)),
+        "duplicate-identical": (good + good, (False, True)),
         "malformed": (good + b"\1\2", (False, True)),
         "trailing-nul": (
             make_note(NOTE_NAME, NOTE_TYPE, EXPECTED_DESCRIPTOR.encode() + b"\0"),
@@ -193,7 +194,7 @@ def main() -> int:
 
     check_fixtures()
     run_c_harness(repo)
-    print("ok: Linx musl PTO ISA identity wiring matches 0.57.1")
+    print("ok: Linx musl PTO ISA identity wiring matches 0.58.0")
     return 0
 
 
