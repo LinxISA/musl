@@ -32,8 +32,7 @@ __cp_end:
 	setc.tgt	ra
 	C.BSTOP
 __cp_cancel:
-	BSTART	CALL, __cancel
-	setret	1f
+	HL.BSTART.STD	CALL, __cancel, ra=1f
 	C.BSTOP
 1:
 	C.BSTART.STD	IND

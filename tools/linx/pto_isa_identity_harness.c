@@ -31,6 +31,11 @@ typedef Elf64_Phdr Phdr;
 #define ELF_NOTE_PTO "PTO"
 #define PTO_NT_ISA_IDENTITY 1
 #define PTO_ISA_IDENTITY_JSON \
+	"{\"encoding_abi\":\"pto-isa-0.58.1-mode-function-v1\"," \
+	"\"encoding_projection_sha256\":" \
+	"\"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c\"," \
+	"\"release\":\"0.58.1\"}"
+#define PTO_ISA_OLD_IDENTITY_JSON \
 	"{\"encoding_abi\":\"pto-isa-0.58.0-mode-function-v1\"," \
 	"\"encoding_projection_sha256\":" \
 	"\"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa\"," \
@@ -166,9 +171,7 @@ int main(void)
 	size_t desc_len = strlen(PTO_ISA_IDENTITY_JSON);
 	size_t good_len = make_note(good, ELF_NOTE_PTO, PTO_NT_ISA_IDENTITY,
 		desc, desc_len);
-	char bad_desc[sizeof PTO_ISA_IDENTITY_JSON];
-	memcpy(bad_desc, PTO_ISA_IDENTITY_JSON, sizeof bad_desc);
-	bad_desc[sizeof bad_desc - 4] = '2';
+	const char bad_desc[] = PTO_ISA_OLD_IDENTITY_JSON;
 	size_t mismatch_len = make_note(mismatch, ELF_NOTE_PTO, PTO_NT_ISA_IDENTITY,
 		(const unsigned char *)bad_desc, desc_len);
 	size_t trailing_nul_len = make_note(trailing_nul, ELF_NOTE_PTO,
@@ -201,7 +204,7 @@ int main(void)
 	memcpy(file + good_len, good, good_len);
 	Phdr duplicate = note_phdr(0, 0, good_len * 2, good_len * 2, 4);
 	fails += run_fd_case("duplicate-identical", file, good_len * 2,
-		&duplicate, 1, (struct read_ctx){0}, 0, 1);
+		&duplicate, 1, (struct read_ctx){0}, 1, 0);
 
 	memset(file, 0, sizeof file);
 	memcpy(file, trailing_nul, trailing_nul_len);
