@@ -9,8 +9,7 @@ vfork:
 	c.movr	sp,	->a1
 	acrc 1
 	.hidden __syscall_ret
-	BSTART	CALL, __syscall_ret
-	setret	1f
+	HL.BSTART.STD	CALL, __syscall_ret, ra=1f
 	C.BSTOP
 1:
 	C.BSTART.STD	IND
