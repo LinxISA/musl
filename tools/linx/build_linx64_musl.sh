@@ -59,6 +59,7 @@ M3_BLOCKER_REPORT="$LOG_DIR/${MODE}-m3-blockers.md"
 M3_NOTEXT_LOG="$LOG_DIR/${MODE}-m3-shared-notext-probe.log"
 SUMMARY="$LOG_DIR/${MODE}-summary.txt"
 RUNTIME_LOG="$LOG_DIR/${MODE}-runtime-builtins.log"
+PTO_IDENTITY_LOCK="$MUSL_ROOT/tools/linx/pto_isa_identity.lock.json"
 
 for exe in "$CLANG" "$AR" "$RANLIB" "$NM" "$STRIP" "$READELF"; do
   if [[ ! -x "$exe" ]]; then
@@ -379,6 +380,9 @@ mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
   echo "target=$TARGET"
   echo "malloc_impl=$MALLOC_IMPL"
   echo "llvm_bin=$LLVM_BIN"
+  echo "pto_identity_release=0.58.3"
+  echo "pto_identity_lock=$PTO_IDENTITY_LOCK"
+  echo "pto_identity_source_commit=e599a3d36ebfad43362ff591ea5e128816c684c7"
   echo "build_dir=$BUILD_DIR"
   echo "install_dir=$INSTALL_DIR"
   echo "runtime_builtins=$RUNTIME_LIB"
@@ -583,10 +587,29 @@ if (
   cd "$BUILD_DIR"
   "$MAKE_BIN" -j"$JOBS" LINX_MUSL_MODE="$MODE" lib/libc.so
 ) >"$M3_LOG" 2>&1; then
+  if ! python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py" \
+      --artifact "$BUILD_DIR/lib/libc.so"; then
+    {
+      echo "pto_identity_artifact=fail"
+      echo "shared_install=not-run"
+      echo "m3=fail"
+    } >>"$SUMMARY"
+    exit 1
+  fi
   install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/lib/libc.so"
   install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/usr/lib/libc.so"
   ln -sf libc.so "$INSTALL_DIR/lib/ld-musl-linx64.so.1"
+  if ! python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py" \
+      --artifact "$INSTALL_DIR/lib/libc.so"; then
+    {
+      echo "pto_identity_artifact=fail"
+      echo "shared_install=fail"
+      echo "m3=fail"
+    } >>"$SUMMARY"
+    exit 1
+  fi
   install_phase_c_shared_abi_pack
+  echo "pto_identity_artifact=pass" >>"$SUMMARY"
   echo "shared_install=pass" >>"$SUMMARY"
   echo "shared_lib=$INSTALL_DIR/lib/libc.so" >>"$SUMMARY"
   echo "shared_loader=$INSTALL_DIR/lib/ld-musl-linx64.so.1" >>"$SUMMARY"

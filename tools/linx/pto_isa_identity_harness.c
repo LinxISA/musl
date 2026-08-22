@@ -31,15 +31,15 @@ typedef Elf64_Phdr Phdr;
 #define ELF_NOTE_PTO "PTO"
 #define PTO_NT_ISA_IDENTITY 1
 #define PTO_ISA_IDENTITY_JSON \
+	"{\"encoding_abi\":\"pto-isa-0.58.3-mode-function-v1\"," \
+	"\"encoding_projection_sha256\":" \
+	"\"8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172\"," \
+	"\"release\":\"0.58.3\"}"
+#define PTO_ISA_OLD_IDENTITY_JSON \
 	"{\"encoding_abi\":\"pto-isa-0.58.1-mode-function-v1\"," \
 	"\"encoding_projection_sha256\":" \
 	"\"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c\"," \
 	"\"release\":\"0.58.1\"}"
-#define PTO_ISA_OLD_IDENTITY_JSON \
-	"{\"encoding_abi\":\"pto-isa-0.58.0-mode-function-v1\"," \
-	"\"encoding_projection_sha256\":" \
-	"\"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa\"," \
-	"\"release\":\"0.58.0\"}"
 #define PTO_NOTE_SCAN_MAX 4096
 #define PTO_ISA_OFFSET_MAX ((uintmax_t)INT64_MAX)
 
@@ -188,7 +188,7 @@ int main(void)
 	memset(file, 0, sizeof file);
 	memcpy(file, mismatch, mismatch_len);
 	Phdr mismatch_ph = note_phdr(0, 0, mismatch_len, mismatch_len, 4);
-	fails += run_fd_case("mismatch", file, mismatch_len, &mismatch_ph, 1,
+	fails += run_fd_case("old-0.58.1", file, mismatch_len, &mismatch_ph, 1,
 		(struct read_ctx){0}, 0, 1);
 
 	memset(file, 0, sizeof file);

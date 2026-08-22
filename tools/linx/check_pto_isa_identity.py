@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Check Linx musl PTO ISA 0.58.1 identity wiring."""
+"""Check Linx musl PTO ISA 0.58.3 identity wiring."""
 
 from __future__ import annotations
 
+import argparse
+import json
 import pathlib
 import re
 import shutil
@@ -13,11 +15,26 @@ import tempfile
 
 
 EXPECTED_DESCRIPTOR = (
-    '{"encoding_abi":"pto-isa-0.58.1-mode-function-v1",'
+    '{"encoding_abi":"pto-isa-0.58.3-mode-function-v1",'
     '"encoding_projection_sha256":'
-    '"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",'
-    '"release":"0.58.1"}'
+    '"8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",'
+    '"release":"0.58.3"}'
 )
+
+EXPECTED_AUTHORITY = {
+    "schema": "linx-musl.pto-isa-identity-lock.v1",
+    "release": "0.58.3",
+    "encoding_abi": "pto-isa-0.58.3-mode-function-v1",
+    "encoding_projection_sha256":
+        "8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",
+    "content_sha256":
+        "f299fe3d256c5d071e57bb4aaa2be2de2e4a386ae090048df1f73ae92d392678",
+    "source": {
+        "repository": "https://github.com/PTO-ISA/pto-spec.git",
+        "commit": "e599a3d36ebfad43362ff591ea5e128816c684c7",
+        "tree": "abb6899d2e664e378ac9c1b77062670daa4d31b4",
+    },
+}
 
 EXPECTED_RELOCS = {
     "R_LINX_TLS_DTPMOD64": 28,
@@ -106,16 +123,16 @@ def check_fixtures() -> None:
     mismatch = make_note(
         NOTE_NAME,
         NOTE_TYPE,
-        b'{"encoding_abi":"pto-isa-0.58.0-mode-function-v1",'
+        b'{"encoding_abi":"pto-isa-0.58.1-mode-function-v1",'
         b'"encoding_projection_sha256":'
-        b'"0cad2272ada8f53fc8354e22568099fe8d6bd4b7832c837260cd370b0fc76ffa",'
-        b'"release":"0.58.0"}',
+        b'"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",'
+        b'"release":"0.58.1"}',
     )
     other = make_note(b"GNU\0", 3, b"build-id")
     cases = {
         "valid": (good, (True, False)),
         "missing": (other, (False, False)),
-        "mismatch": (mismatch, (False, True)),
+        "old-0.58.1": (mismatch, (False, True)),
         "conflict": (good + mismatch, (False, True)),
         "duplicate-identical": (good + good, (True, False)),
         "malformed": (good + b"\1\2", (False, True)),
@@ -129,6 +146,41 @@ def check_fixtures() -> None:
         actual = parse_fixture(payload)
         require(actual == expected,
                 f"fixture {name} expected {expected}, got {actual}")
+
+
+def check_elf_artifact(path: pathlib.Path) -> None:
+    payload = path.read_bytes()
+    require(len(payload) >= 64 and payload[:4] == b"\x7fELF",
+            f"artifact is not ELF: {path}")
+    require(payload[4] == 2 and payload[5] == 1,
+            f"artifact must be ELF64 little-endian: {path}")
+    phoff = struct.unpack_from("<Q", payload, 32)[0]
+    phentsize = struct.unpack_from("<H", payload, 54)[0]
+    phnum = struct.unpack_from("<H", payload, 56)[0]
+    require(phentsize >= 56, f"artifact program header size is invalid: {path}")
+    valid = False
+    invalid = False
+    for index in range(phnum):
+        offset = phoff + index * phentsize
+        require(offset + 56 <= len(payload),
+                f"artifact program header exceeds file: {path}")
+        p_type, _, p_offset, _, _, p_filesz, _, p_align = struct.unpack_from(
+            "<IIQQQQQQ", payload, offset
+        )
+        if p_type != 4 or p_align != 4:
+            continue
+        require(p_offset + p_filesz <= len(payload),
+                f"artifact PT_NOTE exceeds file: {path}")
+        segment_valid, segment_invalid = parse_fixture(
+            payload[p_offset:p_offset + p_filesz]
+        )
+        if segment_invalid:
+            invalid = True
+            valid = False
+            break
+        valid = valid or segment_valid
+    require(valid and not invalid,
+            f"artifact does not carry the exact PTO 0.58.3 identity: {path}")
 
 
 def run_c_harness(repo: pathlib.Path) -> None:
@@ -146,6 +198,10 @@ def run_c_harness(repo: pathlib.Path) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--artifact", action="append", type=pathlib.Path,
+                        default=[])
+    args = parser.parse_args()
     repo = pathlib.Path(__file__).resolve().parents[2]
     elf_h = read(repo, "include/elf.h")
     reloc_h = read(repo, "arch/linx64/reloc.h")
@@ -153,6 +209,9 @@ def main() -> int:
     identity_h = read(repo, "ldso/pto_isa_identity.h")
     configure = read(repo, "configure")
     build_script = read(repo, "tools/linx/build_linx64_musl.sh")
+    authority_lock = json.loads(
+        read(repo, "tools/linx/pto_isa_identity.lock.json")
+    )
 
     require("#define ELF_NOTE_PTO" in elf_h, "ELF_NOTE_PTO missing")
     require("#define PTO_NT_ISA_IDENTITY\t1" in elf_h,
@@ -168,6 +227,8 @@ def main() -> int:
     descriptor = extract_c_string_macro(dynlink, "PTO_ISA_IDENTITY_JSON")
     require(descriptor == EXPECTED_DESCRIPTOR,
             "PTO descriptor is not byte-exact")
+    require("pto-isa-0.58.1-mode-function-v1" not in dynlink,
+            "loader still accepts or embeds the old PTO 0.58.1 identity")
     require("PTO_NOTE_SCAN_MAX 4096" in dynlink, "4KiB scan cap missing")
     require("pread(fd, buf, len, (off_t)off)" in dynlink,
             "fd PT_NOTE path must use positioned pread")
@@ -193,10 +254,32 @@ def main() -> int:
             "legacy linx64v4/v5 configure targets still active")
     require("check_pto_isa_identity.py" in build_script,
             "build gate does not run PTO identity guard")
+    require("pto_isa_identity.lock.json" in build_script and
+            "pto_identity_release=0.58.3" in build_script and
+            EXPECTED_AUTHORITY["source"]["commit"] in build_script,
+            "build summary does not bind the PTO 0.58.3 authority")
+    built_artifact_check = build_script.find(
+        '--artifact "$BUILD_DIR/lib/libc.so"'
+    )
+    shared_install = build_script.find(
+        'install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/lib/libc.so"'
+    )
+    require(built_artifact_check >= 0,
+            "M3 does not validate the build-tree shared libc identity")
+    require(shared_install >= 0 and built_artifact_check < shared_install,
+            "M3 must validate build-tree libc.so before installation")
+    preinstall_gate = build_script[built_artifact_check:shared_install]
+    require("pto_identity_artifact=fail" in preinstall_gate and
+            "m3=fail" in preinstall_gate and "exit 1" in preinstall_gate,
+            "pre-install identity failure must record identity/M3 failure and exit")
+    require(authority_lock == EXPECTED_AUTHORITY,
+            "PTO 0.58.3 source/content authority lock is not exact")
 
     check_fixtures()
     run_c_harness(repo)
-    print("ok: Linx musl PTO ISA identity wiring matches 0.58.1")
+    for artifact in args.artifact:
+        check_elf_artifact(artifact)
+    print("ok: Linx musl PTO ISA identity wiring matches 0.58.3")
     return 0
 
 
