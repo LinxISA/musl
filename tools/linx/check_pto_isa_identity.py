@@ -258,6 +258,20 @@ def main() -> int:
             "pto_identity_release=0.58.3" in build_script and
             EXPECTED_AUTHORITY["source"]["commit"] in build_script,
             "build summary does not bind the PTO 0.58.3 authority")
+    built_artifact_check = build_script.find(
+        '--artifact "$BUILD_DIR/lib/libc.so"'
+    )
+    shared_install = build_script.find(
+        'install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/lib/libc.so"'
+    )
+    require(built_artifact_check >= 0,
+            "M3 does not validate the build-tree shared libc identity")
+    require(shared_install >= 0 and built_artifact_check < shared_install,
+            "M3 must validate build-tree libc.so before installation")
+    preinstall_gate = build_script[built_artifact_check:shared_install]
+    require("pto_identity_artifact=fail" in preinstall_gate and
+            "m3=fail" in preinstall_gate and "exit 1" in preinstall_gate,
+            "pre-install identity failure must record identity/M3 failure and exit")
     require(authority_lock == EXPECTED_AUTHORITY,
             "PTO 0.58.3 source/content authority lock is not exact")
 

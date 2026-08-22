@@ -587,11 +587,27 @@ if (
   cd "$BUILD_DIR"
   "$MAKE_BIN" -j"$JOBS" LINX_MUSL_MODE="$MODE" lib/libc.so
 ) >"$M3_LOG" 2>&1; then
+  if ! python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py" \
+      --artifact "$BUILD_DIR/lib/libc.so"; then
+    {
+      echo "pto_identity_artifact=fail"
+      echo "shared_install=not-run"
+      echo "m3=fail"
+    } >>"$SUMMARY"
+    exit 1
+  fi
   install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/lib/libc.so"
   install -m 755 "$BUILD_DIR/lib/libc.so" "$INSTALL_DIR/usr/lib/libc.so"
   ln -sf libc.so "$INSTALL_DIR/lib/ld-musl-linx64.so.1"
-  python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py" \
-    --artifact "$INSTALL_DIR/lib/libc.so"
+  if ! python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py" \
+      --artifact "$INSTALL_DIR/lib/libc.so"; then
+    {
+      echo "pto_identity_artifact=fail"
+      echo "shared_install=fail"
+      echo "m3=fail"
+    } >>"$SUMMARY"
+    exit 1
+  fi
   install_phase_c_shared_abi_pack
   echo "pto_identity_artifact=pass" >>"$SUMMARY"
   echo "shared_install=pass" >>"$SUMMARY"
