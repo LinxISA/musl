@@ -1,0 +1,12 @@
+{
+  "schema": "linx-musl.pto-isa-identity-lock.v1",
+  "release": "0.58.3",
+  "encoding_abi": "pto-isa-0.58.3-mode-function-v1",
+  "encoding_projection_sha256": "8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",
+  "content_sha256": "f299fe3d256c5d071e57bb4aaa2be2de2e4a386ae090048df1f73ae92d392678",
+  "source": {
+    "repository": "https://github.com/PTO-ISA/pto-spec.git",
+    "commit": "e599a3d36ebfad43362ff591ea5e128816c684c7",
+    "tree": "abb6899d2e664e378ac9c1b77062670daa4d31b4"
+  }
+}
