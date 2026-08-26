@@ -119,6 +119,7 @@ build_runtime_builtins() {
     "atomic_signal_fence.c"
     "atomic_thread_fence.c"
     "linx/fp_mode.c"
+    "linx/group_runtime.c"
   )
 
   if [[ ! -d "$COMPILER_RT_BUILTINS_DIR" ]]; then
@@ -178,6 +179,15 @@ build_runtime_builtins() {
     echo "error: failed to ranlib runtime builtins (see $RUNTIME_LOG)" >&2
     return 1
   fi
+
+  local runtime_symbols symbol
+  runtime_symbols="$("$NM" -g "$RUNTIME_LIB")"
+  for symbol in linx_group_run __linx_group_worker_start; do
+    if ! grep -Eq "[[:space:]]${symbol}$" <<<"$runtime_symbols"; then
+      echo "error: runtime archive missing ${symbol} (see $RUNTIME_LOG)" >&2
+      return 1
+    fi
+  done
 }
 
 install_runtime_builtins_to_sysroot() {
