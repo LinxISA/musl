@@ -51,6 +51,7 @@ PHASE_C_CRTEND="$PHASE_C_CRT_DIR/crtendS.o"
 mkdir -p "$LOG_DIR" "$OUT_ROOT/build" "$OUT_ROOT/install"
 
 python3 "$MUSL_ROOT/tools/linx/check_pto_isa_identity.py"
+python3 "$MUSL_ROOT/tools/linx/check_configure_ldflags.py"
 
 CONFIG_LOG="$LOG_DIR/${MODE}-configure.log"
 M2_LOG="$LOG_DIR/${MODE}-m2-libc-a.log"
@@ -79,7 +80,9 @@ if ! command -v "$MAKE_BIN" >/dev/null 2>&1; then
 fi
 MAKE_LOG_RE='[[:alpha:]]*make: \*\*\* .*obj/[^ ]+.*Error'
 
-CC_CMD="$CLANG --target=$TARGET -fuse-ld=lld"
+PTO_MARCH="-march=linx64+pto-v0591-scoped"
+PTO_LINK_FLAG="-Wl,--linx-pto-v0591-scoped"
+CC_CMD="$CLANG --target=$TARGET $PTO_MARCH -fuse-ld=lld"
 EMPTY_LIB_NAMES=(m rt pthread crypt util xnet resolv dl)
 
 build_runtime_builtins() {
@@ -157,6 +160,7 @@ build_runtime_builtins() {
 
     if ! "$CLANG" \
       --target="$TARGET" \
+      "$PTO_MARCH" \
       -O2 \
       -ffreestanding \
       -fno-builtin \
@@ -226,6 +230,7 @@ EOF
 
   "$CLANG" \
     --target="$TARGET" \
+    "$PTO_MARCH" \
     -O2 \
     -fPIC \
     -ffreestanding \
@@ -236,6 +241,7 @@ EOF
 
   "$CLANG" \
     --target="$TARGET" \
+    "$PTO_MARCH" \
     -O2 \
     -fPIC \
     -ffreestanding \
@@ -315,6 +321,7 @@ recover_phase_a_libc_symbols() {
 
   local -a common_cflags=(
     --target="$TARGET"
+    "$PTO_MARCH"
     -fuse-ld=lld
     -std=c99
     -nostdinc
@@ -390,9 +397,9 @@ mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
   echo "target=$TARGET"
   echo "malloc_impl=$MALLOC_IMPL"
   echo "llvm_bin=$LLVM_BIN"
-  echo "pto_identity_release=0.58.3"
+  echo "pto_identity_release=0.59.1"
   echo "pto_identity_lock=$PTO_IDENTITY_LOCK"
-  echo "pto_identity_source_commit=e599a3d36ebfad43362ff591ea5e128816c684c7"
+  echo "pto_identity_source_commit=a89a53d48f5708328be609fe2e6296ac8bdb4bc2"
   echo "build_dir=$BUILD_DIR"
   echo "install_dir=$INSTALL_DIR"
   echo "runtime_builtins=$RUNTIME_LIB"
@@ -416,6 +423,7 @@ if ! (
   cd "$BUILD_DIR"
   env \
     CC="$CC_CMD" \
+    LDFLAGS="${LDFLAGS:+$LDFLAGS }$PTO_LINK_FLAG" \
     AR="$AR" \
     RANLIB="$RANLIB" \
     NM="$NM" \
@@ -656,7 +664,8 @@ else
   if [[ "${M3_NOTEXT_PROBE:-1}" == "1" ]]; then
     if (
       cd "$BUILD_DIR"
-      "$MAKE_BIN" -j"$JOBS" LINX_MUSL_MODE="$MODE" LDFLAGS="-Wl,-z,notext" lib/libc.so
+      "$MAKE_BIN" -j"$JOBS" LINX_MUSL_MODE="$MODE" \
+        LDFLAGS="$PTO_LINK_FLAG -Wl,-z,notext" lib/libc.so
     ) >"$M3_NOTEXT_LOG" 2>&1; then
       {
         echo

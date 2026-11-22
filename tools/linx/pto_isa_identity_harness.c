@@ -31,15 +31,15 @@ typedef Elf64_Phdr Phdr;
 #define ELF_NOTE_PTO "PTO"
 #define PTO_NT_ISA_IDENTITY 1
 #define PTO_ISA_IDENTITY_JSON \
+	"{\"encoding_abi\":\"pto-isa-0.59.1-mode-function-v1\"," \
+	"\"encoding_projection_sha256\":" \
+	"\"d90c881754d66f2cd26f6014d0b582cba88307e70123583d87fc59a918229c28\"," \
+	"\"release\":\"0.59.1\"}"
+#define PTO_ISA_OLD_IDENTITY_JSON \
 	"{\"encoding_abi\":\"pto-isa-0.58.3-mode-function-v1\"," \
 	"\"encoding_projection_sha256\":" \
 	"\"8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172\"," \
 	"\"release\":\"0.58.3\"}"
-#define PTO_ISA_OLD_IDENTITY_JSON \
-	"{\"encoding_abi\":\"pto-isa-0.58.1-mode-function-v1\"," \
-	"\"encoding_projection_sha256\":" \
-	"\"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c\"," \
-	"\"release\":\"0.58.1\"}"
 #define PTO_NOTE_SCAN_MAX 4096
 #define PTO_ISA_OFFSET_MAX ((uintmax_t)INT64_MAX)
 
