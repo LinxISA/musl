@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Linx musl PTO ISA 0.58.3 identity wiring."""
+"""Check Linx musl PTO ISA 0.59.1 identity wiring."""
 
 from __future__ import annotations
 
@@ -15,24 +15,24 @@ import tempfile
 
 
 EXPECTED_DESCRIPTOR = (
-    '{"encoding_abi":"pto-isa-0.58.3-mode-function-v1",'
+    '{"encoding_abi":"pto-isa-0.59.1-mode-function-v1",'
     '"encoding_projection_sha256":'
-    '"8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",'
-    '"release":"0.58.3"}'
+    '"d90c881754d66f2cd26f6014d0b582cba88307e70123583d87fc59a918229c28",'
+    '"release":"0.59.1"}'
 )
 
 EXPECTED_AUTHORITY = {
     "schema": "linx-musl.pto-isa-identity-lock.v1",
-    "release": "0.58.3",
-    "encoding_abi": "pto-isa-0.58.3-mode-function-v1",
+    "release": "0.59.1",
+    "encoding_abi": "pto-isa-0.59.1-mode-function-v1",
     "encoding_projection_sha256":
-        "8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",
+        "d90c881754d66f2cd26f6014d0b582cba88307e70123583d87fc59a918229c28",
     "content_sha256":
-        "f299fe3d256c5d071e57bb4aaa2be2de2e4a386ae090048df1f73ae92d392678",
+        "11d63af3718a14b5ace927efda3dd0d3b7a8af7251a6dc3d4cfbfa673e9ecd60",
     "source": {
         "repository": "https://github.com/PTO-ISA/pto-spec.git",
-        "commit": "e599a3d36ebfad43362ff591ea5e128816c684c7",
-        "tree": "abb6899d2e664e378ac9c1b77062670daa4d31b4",
+        "commit": "a89a53d48f5708328be609fe2e6296ac8bdb4bc2",
+        "tree": "13807a8af41c4481ebcc88bbf33357cda8041f5d",
     },
 }
 
@@ -128,12 +128,21 @@ def check_fixtures() -> None:
         b'"89b872d6eaf0252200bc9349d49b9346e2a69d894cdcc2dcd0fd71911c1e0b8c",'
         b'"release":"0.58.1"}',
     )
+    previous = make_note(
+        NOTE_NAME,
+        NOTE_TYPE,
+        b'{"encoding_abi":"pto-isa-0.58.3-mode-function-v1",'
+        b'"encoding_projection_sha256":'
+        b'"8a48b80e04484c70870f155bf9efc79d2a805cf99e809f4e4e8a7e6a7eb34172",'
+        b'"release":"0.58.3"}',
+    )
     other = make_note(b"GNU\0", 3, b"build-id")
     cases = {
         "valid": (good, (True, False)),
         "missing": (other, (False, False)),
         "old-0.58.1": (mismatch, (False, True)),
-        "conflict": (good + mismatch, (False, True)),
+        "old-0.58.3": (previous, (False, True)),
+        "conflict": (good + previous, (False, True)),
         "duplicate-identical": (good + good, (True, False)),
         "malformed": (good + b"\1\2", (False, True)),
         "trailing-nul": (
@@ -180,7 +189,7 @@ def check_elf_artifact(path: pathlib.Path) -> None:
             break
         valid = valid or segment_valid
     require(valid and not invalid,
-            f"artifact does not carry the exact PTO 0.58.3 identity: {path}")
+            f"artifact does not carry the exact PTO 0.59.1 identity: {path}")
 
 
 def run_c_harness(repo: pathlib.Path) -> None:
@@ -255,9 +264,9 @@ def main() -> int:
     require("check_pto_isa_identity.py" in build_script,
             "build gate does not run PTO identity guard")
     require("pto_isa_identity.lock.json" in build_script and
-            "pto_identity_release=0.58.3" in build_script and
+            "pto_identity_release=0.59.1" in build_script and
             EXPECTED_AUTHORITY["source"]["commit"] in build_script,
-            "build summary does not bind the PTO 0.58.3 authority")
+            "build summary does not bind the PTO 0.59.1 authority")
     built_artifact_check = build_script.find(
         '--artifact "$BUILD_DIR/lib/libc.so"'
     )
@@ -273,13 +282,13 @@ def main() -> int:
             "m3=fail" in preinstall_gate and "exit 1" in preinstall_gate,
             "pre-install identity failure must record identity/M3 failure and exit")
     require(authority_lock == EXPECTED_AUTHORITY,
-            "PTO 0.58.3 source/content authority lock is not exact")
+            "PTO 0.59.1 source/content authority lock is not exact")
 
     check_fixtures()
     run_c_harness(repo)
     for artifact in args.artifact:
         check_elf_artifact(artifact)
-    print("ok: Linx musl PTO ISA identity wiring matches 0.58.3")
+    print("ok: Linx musl PTO ISA identity wiring matches 0.59.1")
     return 0
 
 
